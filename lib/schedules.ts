@@ -83,6 +83,23 @@ async function toView(doc: ScheduleDoc): Promise<ScheduleView> {
   }
 }
 
+/** Next firing: one interval after the last run ended (or creation), never in the past. */
+function nextTickFor(
+  s: Pick<ScheduleDoc, "lastRunAt" | "createdAt" | "intervalSeconds">
+): Date {
+  const base = s.lastRunAt ?? s.createdAt
+  return new Date(
+    Math.max(Date.now(), base.getTime() + s.intervalSeconds * 1000)
+  )
+}
+
+/** A schedule that has used up its run budget must not be planned again. */
+export function isExhausted(
+  s: Pick<ScheduleDoc, "maxRuns" | "runCount">
+): boolean {
+  return s.maxRuns != null && s.runCount >= s.maxRuns
+}
+
 // ── Agenda planning ─────────────────────────────────────────────────────
 
 async function agenda() {
@@ -200,6 +217,8 @@ export async function updateSchedule(
 
   if (!after.enabled) {
     await disableSchedule(oid)
+  } else if (isExhausted(after)) {
+    await disableSchedule(oid)
   } else if (!before.enabled) {
     await planNextTick(oid, new Date())
   } else if (
@@ -207,10 +226,7 @@ export async function updateSchedule(
     patch.deviceSerial !== undefined ||
     patch.maxRuns !== undefined
   ) {
-    const base = after.lastRunAt ?? after.createdAt
-    const when = new Date(
-      Math.max(Date.now(), base.getTime() + after.intervalSeconds * 1000)
-    )
+    const when = nextTickFor(after)
     await planNextTick(oid, when)
   }
   return getSchedule(id)
@@ -272,66 +288,87 @@ export async function executeScheduleTick(scheduleId: string): Promise<void> {
     return
   }
 
-  let unavailable: string | null = null
+  let next: Date | null = new Date(Date.now() + schedule.intervalSeconds * 1000)
   try {
-    await syncDevices()
-  } catch (err) {
-    unavailable = `executor unreachable: ${err instanceof Error ? err.message : String(err)}`
-  }
-  const device = await Device.findOne({ serial: schedule.deviceSerial }).lean()
-  if (!unavailable) {
-    if (!device || !device.online) unavailable = "device offline"
-    else if (device.activeRunId) unavailable = "device busy"
-  }
+    let unavailable: string | null = null
+    try {
+      await syncDevices()
+    } catch (err) {
+      unavailable = `executor unreachable: ${err instanceof Error ? err.message : String(err)}`
+    }
+    const device = await Device.findOne({
+      serial: schedule.deviceSerial,
+    }).lean()
+    if (!unavailable) {
+      if (!device || !device.online) unavailable = "device offline"
+      else if (device.activeRunId) unavailable = "device busy"
+    }
 
-  if (unavailable) {
-    await createSkippedRun({
-      taskId: schedule.taskId.toString(),
-      deviceSerial: schedule.deviceSerial,
-      scheduleId,
-      reason: unavailable,
-    })
-    await planNextTick(
+    if (unavailable) {
+      await createSkippedRun({
+        taskId: schedule.taskId.toString(),
+        deviceSerial: schedule.deviceSerial,
+        scheduleId,
+        reason: unavailable,
+      })
+      return
+    }
+
+    let run: { id: string }
+    try {
+      run = await createRun({
+        taskId: schedule.taskId.toString(),
+        deviceSerial: schedule.deviceSerial,
+        trigger: "schedule",
+        scheduleId,
+      })
+    } catch (err) {
+      // Lost the race for the device (or the task vanished): record a skip, keep the schedule alive.
+      await createSkippedRun({
+        taskId: schedule.taskId.toString(),
+        deviceSerial: schedule.deviceSerial,
+        scheduleId,
+        reason: err instanceof Error ? err.message : String(err),
+      }).catch(() => undefined)
+      return
+    }
+    const { executeRun } = await import("@/lib/jobs/run-task")
+    await executeRun(run.id)
+
+    const finishedAt = new Date()
+    const updated = await Schedule.findByIdAndUpdate(
       oid,
-      new Date(Date.now() + schedule.intervalSeconds * 1000)
-    )
-    return
-  }
-
-  const run = await createRun({
-    taskId: schedule.taskId.toString(),
-    deviceSerial: schedule.deviceSerial,
-    trigger: "schedule",
-    scheduleId,
-  })
-  const { executeRun } = await import("@/lib/jobs/run-task")
-  await executeRun(run.id)
-
-  const finishedAt = new Date()
-  const updated = await Schedule.findByIdAndUpdate(
-    oid,
-    {
-      $inc: { runCount: 1 },
-      $set: {
-        lastRunId: new mongoose.Types.ObjectId(run.id),
-        lastRunAt: finishedAt,
+      {
+        $inc: { runCount: 1 },
+        $set: {
+          lastRunId: new mongoose.Types.ObjectId(run.id),
+          lastRunAt: finishedAt,
+        },
       },
-    },
-    { new: true }
-  ).lean<ScheduleDoc>()
-  if (!updated || !updated.enabled) return
-  if (
-    updated.maxRuns !== null &&
-    updated.maxRuns !== undefined &&
-    updated.runCount >= updated.maxRuns
-  ) {
-    await disableSchedule(oid)
-    return
+      { new: true }
+    ).lean<ScheduleDoc>()
+    if (!updated || !updated.enabled) {
+      next = null
+      return
+    }
+    if (isExhausted(updated)) {
+      await disableSchedule(oid)
+      next = null
+      return
+    }
+    next = new Date(finishedAt.getTime() + updated.intervalSeconds * 1000)
+  } catch (err) {
+    console.error(`[schedule-tick] ${scheduleId} failed`, err)
+  } finally {
+    if (next) {
+      await planNextTick(oid, next).catch((err: unknown) =>
+        console.error(
+          `[schedule-tick] ${scheduleId} could not plan next tick`,
+          err
+        )
+      )
+    }
   }
-  await planNextTick(
-    oid,
-    new Date(finishedAt.getTime() + updated.intervalSeconds * 1000)
-  )
 }
 
 /** Ensures every enabled schedule has a pending tick; called at server start. */
@@ -340,11 +377,12 @@ export async function reconcileSchedules(): Promise<number> {
   const enabled = await Schedule.find({ enabled: true }).lean<ScheduleDoc[]>()
   let planned = 0
   for (const s of enabled) {
+    if (isExhausted(s)) {
+      await disableSchedule(s._id)
+      continue
+    }
     if ((await pendingTickCount(s._id)) === 0) {
-      const base = s.lastRunAt ?? s.createdAt
-      const when = new Date(
-        Math.max(Date.now(), base.getTime() + s.intervalSeconds * 1000)
-      )
+      const when = nextTickFor(s)
       await planNextTick(s._id, when)
       planned++
     }

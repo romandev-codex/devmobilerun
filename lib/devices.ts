@@ -31,22 +31,30 @@ export async function syncDevices(): Promise<DeviceView[]> {
   const now = new Date()
   const serials = seen.map((d) => d.serial)
 
-  await Promise.all(
-    seen.map((d) =>
-      Device.updateOne(
-        { serial: d.serial },
-        {
-          $set: {
-            online: d.state === "device",
-            adbState: d.state,
-            lastSeenAt: now,
-            ...(d.model ? { model: d.model } : {}),
-          },
-          $setOnInsert: { displayName: null, activeRunId: null },
+  const upsert = (d: (typeof seen)[number]) =>
+    Device.updateOne(
+      { serial: d.serial },
+      {
+        $set: {
+          online: d.state === "device",
+          adbState: d.state,
+          lastSeenAt: now,
+          ...(d.model ? { model: d.model } : {}),
         },
-        { upsert: true }
-      )
+        $setOnInsert: { displayName: null, activeRunId: null },
+      },
+      { upsert: true }
     )
+  await Promise.all(
+    seen.map(async (d) => {
+      try {
+        await upsert(d)
+      } catch (err) {
+        // Two syncs inserting the same new serial at once: the loser retries as a plain update.
+        if ((err as { code?: number }).code !== 11000) throw err
+        await upsert(d)
+      }
+    })
   )
   await Device.updateMany(
     { serial: { $nin: serials } },

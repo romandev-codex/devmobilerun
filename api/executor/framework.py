@@ -117,11 +117,11 @@ class MobilerunFramework:
     async def screenshot(self, serial: str) -> bytes:
         from async_adbutils import adb
 
-        infos = await adb.list()
-        if not any(i.serial == serial and i.state == "device" for i in infos):
-            raise DeviceNotFound(serial)
-        device = await adb.device(serial=serial)
-        return await device.screenshot_bytes()
+        try:
+            device = await adb.device(serial=serial)
+            return await device.screenshot_bytes()
+        except Exception as exc:  # noqa: BLE001 - adb reports missing/offline devices as errors
+            raise DeviceNotFound(serial) from exc
 
     async def open_url(self, serial: str, url: str) -> None:
         from async_adbutils import adb
@@ -136,8 +136,8 @@ class MobilerunFramework:
 def map_framework_event(event: Any, step_counter: list[int]) -> RunEvent | None:
     """Translates a llama-index workflow event from the framework into a RunEvent.
 
-    ``step_counter`` is a one-element list holding the running screenshot index so
-    the mapping stays a pure function of its arguments.
+    ``step_counter`` is a one-element list holding the running screenshot index;
+    the caller owns it so the mapper needs no state of its own.
     """
     from mobilerun.agent.common.events import ScreenshotEvent, ToolExecutionEvent
     from mobilerun.agent.droid.events import FastAgentResultEvent, FinalizeEvent

@@ -16,11 +16,12 @@ from dataclasses import dataclass, field
 from typing import AsyncIterator
 
 from .events import RunEvent
-from .framework import DeviceNotFound, Framework, RunSpec
+from .framework import AgentRun, DeviceNotFound, Framework, RunSpec
 
 logger = logging.getLogger(__name__)
 
 FINISHED_RETENTION_SECONDS = 120.0
+REPLAY_IMAGE_LIMIT = 5
 
 
 class DeviceBusy(Exception):
@@ -48,15 +49,36 @@ class ActiveRun:
     buffer: list[SeqEvent] = field(default_factory=list)
     subscribers: list[asyncio.Queue[SeqEvent | None]] = field(default_factory=list)
     finished_at: float | None = None
-    agent_run: object | None = None
+    agent_run: AgentRun | None = None
+    cancel_requested: bool = False
+
+    def _trim_replay_images(self) -> None:
+        """Keeps image bytes only for the newest screenshots in the replay buffer.
+
+        The app persists every screenshot as it streams; a reconnecting subscriber
+        only needs the recent ones, so older replayed screenshots carry no image.
+        """
+        keep = REPLAY_IMAGE_LIMIT
+        for item in reversed(self.buffer):
+            if item.event.type != "screenshot" or "png" not in item.event.payload:
+                continue
+            if keep > 0:
+                keep -= 1
+                continue
+            payload = {k: v for k, v in item.event.payload.items() if k != "png"}
+            self.buffer[item.seq] = SeqEvent(item.seq, RunEvent("screenshot", {**payload, "pruned": True}))
 
     @property
     def done(self) -> bool:
         return self.finished_at is not None
 
     def publish(self, event: RunEvent) -> None:
+        # A stop request wins over whatever the agent reports afterwards.
+        if self.cancel_requested and event.terminal:
+            event = RunEvent("cancelled", {})
         item = SeqEvent(seq=len(self.buffer), event=event)
         self.buffer.append(item)
+        self._trim_replay_images()
         for q in self.subscribers:
             q.put_nowait(item)
         if event.terminal:
@@ -114,10 +136,11 @@ class RunManager:
         run = self.get(run_id)
         if run.done or run.task is None:
             return
+        run.cancel_requested = True
         agent_run = run.agent_run
         if agent_run is not None:
             with contextlib.suppress(Exception):
-                await agent_run.cancel()  # type: ignore[attr-defined]
+                await agent_run.cancel()
         run.task.cancel()
 
     async def _execute(self, run: ActiveRun) -> None:

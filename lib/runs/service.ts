@@ -13,7 +13,7 @@ import {
 } from "@/lib/models/run"
 import { RunEvent, type RunEventDoc } from "@/lib/models/run-event"
 import { composeInstruction } from "@/lib/runs/compose"
-import { getTask } from "@/lib/tasks"
+import { getTask, type TaskSummary } from "@/lib/tasks"
 
 export type RunView = {
   id: string
@@ -53,7 +53,7 @@ export function toRunView(doc: RunDoc): RunView {
     deviceSerial: doc.deviceSerial,
     status: doc.status,
     trigger: doc.trigger,
-    instruction: doc.instruction,
+    instruction: doc.instruction ?? "",
     startUrl: doc.startUrl ?? null,
     options: doc.options,
     variables: (doc.variables as Record<string, string>) ?? {},
@@ -89,6 +89,25 @@ export function isTerminal(status: RunStatus): boolean {
 
 const asObjectId = (id: string, what = "Run") => toObjectId(id, what)
 
+/** The snapshot of a task every run carries, shared by real and skipped runs. */
+function runFields(
+  task: TaskSummary,
+  deviceSerial: string,
+  scheduleId: string | null
+) {
+  const { instruction, startUrl } = composeInstruction(task)
+  return {
+    taskId: new mongoose.Types.ObjectId(task.id),
+    taskName: task.name,
+    scheduleId: scheduleId ? new mongoose.Types.ObjectId(scheduleId) : null,
+    deviceSerial,
+    instruction,
+    startUrl,
+    options: task.options,
+    variables: Object.fromEntries(task.variables.map((v) => [v.key, v.value])),
+  }
+}
+
 export const runNowSchema = z.object({ deviceSerial: z.string().trim().min(1) })
 
 /**
@@ -109,20 +128,10 @@ export async function createRun(input: {
   if (device.activeRunId)
     throw conflict(`Device ${input.deviceSerial} is busy with another run`)
 
-  const { instruction, startUrl } = composeInstruction(task)
   const doc = await Run.create({
-    taskId: new mongoose.Types.ObjectId(task.id),
-    taskName: task.name,
-    scheduleId: input.scheduleId
-      ? new mongoose.Types.ObjectId(input.scheduleId)
-      : null,
-    deviceSerial: input.deviceSerial,
+    ...runFields(task, input.deviceSerial, input.scheduleId ?? null),
     status: "queued",
     trigger: input.trigger,
-    instruction,
-    startUrl,
-    options: task.options,
-    variables: Object.fromEntries(task.variables.map((v) => [v.key, v.value])),
   })
   return toRunView(doc.toObject() as RunDoc)
 }
@@ -136,18 +145,10 @@ export async function createSkippedRun(input: {
 }): Promise<RunView> {
   await connectDb()
   const task = await getTask(input.taskId)
-  const { instruction, startUrl } = composeInstruction(task)
   const doc = await Run.create({
-    taskId: new mongoose.Types.ObjectId(task.id),
-    taskName: task.name,
-    scheduleId: new mongoose.Types.ObjectId(input.scheduleId),
-    deviceSerial: input.deviceSerial,
+    ...runFields(task, input.deviceSerial, input.scheduleId),
     status: "skipped",
     trigger: "schedule",
-    instruction,
-    startUrl,
-    options: task.options,
-    variables: Object.fromEntries(task.variables.map((v) => [v.key, v.value])),
     finishedAt: new Date(),
     skipReason: input.reason,
   })
@@ -208,14 +209,39 @@ export async function finishRun(
         result: { success: boolean; reason: string; steps: number }
       }
     | { status: "failed" | "lost" | "cancelled"; error: string | null }
-): Promise<void> {
+): Promise<boolean> {
   const $set: Record<string, unknown> = {
     status: outcome.status,
     finishedAt: new Date(),
   }
   if ("result" in outcome) $set.result = outcome.result
   if ("error" in outcome) $set.error = outcome.error
-  await Run.updateOne({ _id: runId }, { $set })
+  // Only a run that is still in flight can finish; a later writer never overwrites a terminal status.
+  const res = await Run.updateOne(
+    { _id: runId, status: { $in: ["queued", "running"] } },
+    { $set }
+  )
+  return res.matchedCount === 1
+}
+
+/** Compare-and-set: applies `$set` only if the run is still in `from`. */
+export async function transitionRun(
+  runId: mongoose.Types.ObjectId,
+  from: RunStatus,
+  $set: Record<string, unknown>
+): Promise<boolean> {
+  const res = await Run.updateOne({ _id: runId, status: from }, { $set })
+  return res.matchedCount === 1
+}
+
+export async function lastRunEventSeq(
+  runId: mongoose.Types.ObjectId
+): Promise<number> {
+  const last = await RunEvent.findOne({ runId })
+    .sort({ seq: -1 })
+    .select("seq")
+    .lean<{ seq: number }>()
+  return last ? last.seq : -1
 }
 
 export async function appendRunEvent(
@@ -248,9 +274,16 @@ export async function stopRun(id: string): Promise<RunView> {
   if (isTerminal(run.status)) throw conflict(`Run is already ${run.status}`)
 
   if (run.status === "queued") {
-    await finishRun(run._id, { status: "cancelled", error: null })
-    await releaseDeviceLock(run.deviceSerial, run._id)
-    return getRun(id)
+    const cancelled = await transitionRun(run._id, "queued", {
+      status: "cancelled",
+      finishedAt: new Date(),
+      error: null,
+    })
+    if (cancelled) {
+      await releaseDeviceLock(run.deviceSerial, run._id)
+      return getRun(id)
+    }
+    // The job picked it up meanwhile; fall through and stop it on the executor.
   }
 
   const { executor, ExecutorError } = await import("@/lib/executor/client")
@@ -301,7 +334,9 @@ export async function listRuns(query: unknown): Promise<RunPage> {
   if (q.status) filter.status = q.status
   if (q.trigger) filter.trigger = q.trigger
   if (q.before) filter._id = { $lt: asObjectId(q.before) }
+  // Lists never render the prompt/app card snapshots or the instruction; skip them.
   const docs = await Run.find(filter)
+    .select("-prompts -appCards -instruction")
     .sort({ _id: -1 })
     .limit(q.limit + 1)
     .lean<RunDoc[]>()

@@ -67,7 +67,19 @@ export const createTaskSchema = z.object({
   variables: taskVariablesSchema.default([]),
 })
 
-export const updateTaskSchema = createTaskSchema.partial()
+/** Option fields without defaults, so a patch only touches what it names. */
+const taskOptionsPatchSchema = z
+  .object({
+    vision: z.boolean(),
+    reasoning: z.boolean(),
+    maxSteps: z.number().int().min(1).max(500),
+  })
+  .partial()
+
+export const updateTaskSchema = createTaskSchema
+  .omit({ options: true })
+  .extend({ options: taskOptionsPatchSchema })
+  .partial()
 
 export type TaskInput = z.infer<typeof createTaskSchema>
 
@@ -192,11 +204,14 @@ export async function updateTask(
   id: string,
   input: unknown
 ): Promise<TaskView> {
-  const patch = updateTaskSchema.parse(input)
+  const { options, ...rest } = updateTaskSchema.parse(input)
   await connectDb()
+  // Option fields are set individually so a partial options object keeps the untouched ones.
+  const $set: Record<string, unknown> = { ...rest }
+  for (const [k, v] of Object.entries(options ?? {})) $set[`options.${k}`] = v
   const doc = await Task.findByIdAndUpdate(
     asObjectId(id),
-    { $set: patch },
+    { $set },
     { new: true }
   ).lean<TaskDoc>()
   if (!doc) throw notFound("Task")

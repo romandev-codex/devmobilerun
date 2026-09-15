@@ -13,6 +13,7 @@ let fake: FakeExecutor
 let script: SseScript = []
 let startResponses: { status: number; body: unknown }[] = []
 let startBodies: Record<string, unknown>[] = []
+let eventsStatus = 200
 
 const json = (body: unknown) => ({
   headers: { "content-type": "application/json" },
@@ -30,7 +31,19 @@ beforeAll(async () => {
     const next = startResponses.shift() ?? { status: 202, body: { runId: "x" } }
     json(next.body, next.status)
   })
-  fake.on("GET", "/runs/:id/events", (_req, res) => writeSse(res, script))
+  fake.on("GET", "/runs/:id/events", (req, res, { json }) => {
+    if (eventsStatus !== 200) {
+      return json(
+        { error: { code: "run_not_found", message: "not active" } },
+        eventsStatus
+      )
+    }
+    const after = Number(req.headers["last-event-id"] ?? -1)
+    return writeSse(
+      res,
+      script.filter((e, i) => (e.id ?? i) > after)
+    )
+  })
   fake.on("POST", "/runs/:id/stop", (_req, _res, { json }) =>
     json({ runId: "x" }, 202)
   )
@@ -43,6 +56,7 @@ afterAll(async () => {
 })
 
 afterEach(() => {
+  eventsStatus = 200
   script = []
   startResponses = []
   startBodies = []
@@ -316,27 +330,124 @@ describe("executeRun", () => {
     expect(String(run.error)).toContain("stream ended")
   })
 
-  it("marks a run that is already running as lost instead of restarting it", async () => {
+  it("reattaches to a running run after a restart instead of restarting it", async () => {
     await syncDevices()
     const task = await createTask()
     const { body } = await runNow(task.id)
     const { Run } = await import("@/lib/models/run")
-    const { Device } = await import("@/lib/models/device")
+    const { RunEvent } = await import("@/lib/models/run-event")
+    const oid = new mongoose.Types.ObjectId(body.run.id)
+    await Run.updateOne(
+      { _id: oid },
+      { $set: { status: "running", startedAt: new Date() } }
+    )
+    await RunEvent.create({
+      runId: oid,
+      seq: 0,
+      type: "started",
+      at: new Date(),
+      payload: {},
+    })
+    script = [
+      { id: 0, event: "started", data: {} },
+      { id: 1, event: "thought", data: { text: "still going" } },
+      {
+        id: 2,
+        event: "result",
+        data: { success: true, reason: "done", steps: 3 },
+      },
+    ]
+    const before = startBodies.length
+    const { executeRun } = await import("@/lib/jobs/run-task")
+    await executeRun(body.run.id)
+    const { run, events } = await getRun(body.run.id)
+    expect(run.status).toBe("succeeded")
+    expect(events.map((e) => e.seq)).toEqual([0, 1, 2])
+    expect(startBodies.length).toBe(before)
+    expect((await device())!.activeRunId).toBeNull()
+  })
+
+  it("marks a running run lost when the executor no longer knows it", async () => {
+    await syncDevices()
+    const task = await createTask()
+    const { body } = await runNow(task.id)
+    const { Run } = await import("@/lib/models/run")
     await Run.updateOne(
       { _id: body.run.id },
       { $set: { status: "running", startedAt: new Date() } }
     )
-    await Device.updateOne(
-      { serial: "emulator-5554" },
-      { $set: { activeRunId: new mongoose.Types.ObjectId(body.run.id) } }
-    )
-    const before = startBodies.length
+    eventsStatus = 404
     const { executeRun } = await import("@/lib/jobs/run-task")
     await executeRun(body.run.id)
     const { run } = await getRun(body.run.id)
     expect(run.status).toBe("lost")
+    expect((await device())!.activeRunId).toBeNull()
+  })
+
+  it("reconnects from the last event when the stream drops, and gives up cleanly", async () => {
+    await syncDevices()
+    const task = await createTask()
+    const { body } = await runNow(task.id)
+    let calls = 0
+    fake.on("GET", "/runs/:id/events", (req, res) => {
+      calls++
+      const after = Number(req.headers["last-event-id"] ?? -1)
+      if (calls === 1)
+        return writeSse(res, [{ id: 0, event: "started", data: {} }])
+      return writeSse(
+        res,
+        [
+          { id: 0, event: "started", data: {} },
+          {
+            id: 1,
+            event: "result",
+            data: { success: true, reason: "ok", steps: 1 },
+          },
+        ].filter((e) => e.id > after)
+      )
+    })
+    const { executeRun } = await import("@/lib/jobs/run-task")
+    await executeRun(body.run.id)
+    const { run, events } = await getRun(body.run.id)
+    expect(run.status).toBe("succeeded")
+    expect(events.map((e) => e.seq)).toEqual([0, 1])
+    expect(calls).toBe(2)
+    fake.on("GET", "/runs/:id/events", (req, res) => writeSse(res, script))
+  }, 20_000)
+
+  it("does not run a queued run that was stopped before the job picked it up", async () => {
+    await syncDevices()
+    const task = await createTask()
+    const { body } = await runNow(task.id)
+    const stop = await import("@/app/api/runs/[id]/stop/route")
+    await stop.POST(new Request("http://app/x", { method: "POST" }), {
+      params: Promise.resolve({ id: body.run.id }),
+    })
+    const before = startBodies.length
+    const { executeRun } = await import("@/lib/jobs/run-task")
+    await executeRun(body.run.id)
+    const { run } = await getRun(body.run.id)
+    expect(run.status).toBe("cancelled")
     expect(startBodies.length).toBe(before)
     expect((await device())!.activeRunId).toBeNull()
+  })
+
+  it("never overwrites a terminal status with a later result", async () => {
+    await syncDevices()
+    const task = await createTask()
+    const { body } = await runNow(task.id)
+    const { finishRun } = await import("@/lib/runs/service")
+    const oid = new mongoose.Types.ObjectId(body.run.id)
+    expect(await finishRun(oid, { status: "cancelled", error: null })).toBe(
+      true
+    )
+    expect(
+      await finishRun(oid, {
+        status: "succeeded",
+        result: { success: true, reason: "late", steps: 1 },
+      })
+    ).toBe(false)
+    expect((await getRun(body.run.id)).run.status).toBe("cancelled")
   })
 })
 

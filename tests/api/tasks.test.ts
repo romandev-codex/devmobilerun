@@ -143,4 +143,20 @@ describe("tasks", () => {
     expect((await dup()).name).toBe("Dup me (copy 2)")
     expect((await dup()).goal).toBe("g")
   })
+
+  it("a partial options update keeps the untouched option fields", async () => {
+    const { body: created } = await create({
+      ...valid,
+      options: { vision: false, reasoning: true, maxSteps: 200 },
+    })
+    const updated = await one("PATCH", created.task.id, {
+      options: { vision: true },
+    })
+    expect(updated.status).toBe(200)
+    expect(updated.body.task.options).toEqual({
+      vision: true,
+      reasoning: true,
+      maxSteps: 200,
+    })
+  })
 })

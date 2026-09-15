@@ -37,6 +37,8 @@ function toView(doc: SettingsDoc): SettingsView {
 
 export async function getSettings(): Promise<SettingsView> {
   await connectDb()
+  const existing = await Settings.findById(SETTINGS_ID).lean<SettingsDoc>()
+  if (existing) return toView(existing)
   const doc = await Settings.findOneAndUpdate(
     { _id: SETTINGS_ID },
     { $setOnInsert: { _id: SETTINGS_ID } },
@@ -98,5 +100,10 @@ export async function updateSettings(input: unknown): Promise<SettingsView> {
     { $set, $setOnInsert: { _id: SETTINGS_ID } },
     { upsert: true, new: true, setDefaultsOnInsert: true }
   ).lean<SettingsDoc>()
-  return toView(doc!)
+  const view = toView(doc!)
+  if (patch.screenshotRetentionRuns !== undefined) {
+    const { applyScreenshotRetention } = await import("@/lib/runs/screenshots")
+    await applyScreenshotRetention(null, view.screenshotRetentionRuns)
+  }
+  return view
 }

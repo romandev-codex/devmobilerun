@@ -24,7 +24,7 @@ afterAll(async () => {
 })
 
 describe("reconcileOnBoot", () => {
-  it("marks in-flight runs lost, frees devices and releases stale job locks", async () => {
+  it("re-arms jobs for in-flight runs, enqueues missing ones and drops locked ticks", async () => {
     const { GET } = await import("@/app/api/devices/route")
     await GET(new Request("http://app/api/devices"), {})
     const tasks = await import("@/app/api/tasks/route")
@@ -38,7 +38,14 @@ describe("reconcileOnBoot", () => {
     )
     const taskId = (await t.json()).task.id as string
     const runNow = await import("@/app/api/tasks/[id]/run/route")
+    const { Run } = await import("@/lib/models/run")
+    const { Device } = await import("@/lib/models/device")
+    const jobs = mongoose.connection.db!.collection("agendaJobs")
     const start = async () => {
+      await Device.updateOne(
+        { serial: "emulator-5554" },
+        { $set: { activeRunId: null } }
+      )
       const r = await runNow.POST(
         new Request("http://app/x", {
           method: "POST",
@@ -49,51 +56,53 @@ describe("reconcileOnBoot", () => {
       )
       return (await r.json()).run.id as string
     }
-    const inFlight = await start()
-    const { Run } = await import("@/lib/models/run")
-    const { Device } = await import("@/lib/models/device")
+
+    // A run whose job was locked by the dead process.
+    const withJob = await start()
     await Run.updateOne(
-      { _id: inFlight },
+      { _id: withJob },
       { $set: { status: "running", startedAt: new Date() } }
     )
-    await Device.updateOne(
-      { serial: "emulator-5554" },
-      { $set: { activeRunId: new mongoose.Types.ObjectId(inFlight) } }
+    await jobs.updateOne(
+      { "data.runId": withJob },
+      { $set: { lockedAt: new Date(), nextRunAt: null } }
     )
-    await mongoose.connection
-      .db!.collection("agendaJobs")
-      .updateOne({ "data.runId": inFlight }, { $set: { lockedAt: new Date() } })
-    await Device.updateOne(
-      { serial: "emulator-5554" },
-      { $set: { activeRunId: null } }
+    // A run started inline by a schedule tick: no run-task job of its own.
+    const inline = await start()
+    await Run.updateOne(
+      { _id: inline },
+      { $set: { status: "running", startedAt: new Date() } }
     )
-    const stillQueued = await start()
-    await Device.updateOne(
-      { serial: "emulator-5554" },
-      { $set: { activeRunId: new mongoose.Types.ObjectId(inFlight) } }
-    )
+    await jobs.deleteMany({ "data.runId": inline })
+    // A queued run must be left alone; a locked tick must be dropped.
+    const queued = await start()
+    await jobs.insertOne({
+      name: "schedule-tick",
+      data: { scheduleId: "x" },
+      lockedAt: new Date(),
+      nextRunAt: null,
+    })
 
     const { reconcileOnBoot } = await import("@/lib/jobs/reconcile")
-    const report = await reconcileOnBoot()
-    expect(report).toEqual({ lostRuns: 1, freedDevices: 1, unlockedJobs: 1 })
-
-    const lost = await Run.findById(inFlight).lean()
-    expect(lost!.status).toBe("lost")
-    expect(lost!.finishedAt).toBeTruthy()
-    expect(String(lost!.error)).toContain("restarted")
-    expect((await Run.findById(stillQueued).lean())!.status).toBe("queued")
-    expect(
-      (await Device.findOne({ serial: "emulator-5554" }).lean())!.activeRunId
-    ).toBeNull()
-    const job = await mongoose.connection
-      .db!.collection("agendaJobs")
-      .findOne({ "data.runId": inFlight })
-    expect(job!.lockedAt).toBeNull()
-
     expect(await reconcileOnBoot()).toEqual({
-      lostRuns: 0,
-      freedDevices: 0,
-      unlockedJobs: 0,
+      resumedRuns: 2,
+      unlockedJobs: 1,
+      droppedTicks: 1,
     })
+
+    expect((await Run.findById(withJob).lean())!.status).toBe("running")
+    expect((await Run.findById(queued).lean())!.status).toBe("queued")
+    const rearmed = await jobs.findOne({ "data.runId": withJob })
+    expect(rearmed!.lockedAt).toBeNull()
+    expect(rearmed!.nextRunAt).toBeTruthy()
+    expect(
+      await jobs.countDocuments({ name: "run-task", "data.runId": inline })
+    ).toBe(1)
+    expect(
+      await jobs.countDocuments({
+        name: "schedule-tick",
+        lockedAt: { $ne: null },
+      })
+    ).toBe(0)
   })
 })

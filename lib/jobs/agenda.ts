@@ -35,6 +35,7 @@ export async function getAgenda(): Promise<Agenda> {
       : never,
     db: { collection: "agendaJobs" },
     processEvery: "2 seconds",
+    ensureIndex: true,
     maxConcurrency: 20,
   })
   agenda.define<RunTaskData>(
@@ -51,6 +52,10 @@ export async function getAgenda(): Promise<Agenda> {
     },
     { lockLifetime: MAX_RUN_LIFETIME_MS, concurrency: 20 }
   )
+  // One-off jobs are not needed once they ran; keep the collection small.
+  agenda.on("success", (job: Job) => {
+    if (!job.attrs.repeatInterval) void job.remove().catch(() => undefined)
+  })
   globalForAgenda.__agenda = agenda
   await agenda.ready
   return agenda
@@ -64,7 +69,7 @@ export function startAgenda(): Promise<void> {
         const report = await reconcileOnBoot()
         const planned = await reconcileSchedules()
         if (planned) console.warn("[agenda] re-planned schedules", planned)
-        if (report.lostRuns || report.freedDevices || report.unlockedJobs) {
+        if (report.resumedRuns || report.droppedTicks) {
           console.warn("[agenda] reconciled after restart", report)
         }
         await agenda.start()

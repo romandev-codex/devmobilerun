@@ -297,4 +297,59 @@ describe("schedules", () => {
       await Schedule.countDocuments({ _id: new mongoose.Types.ObjectId(b) })
     ).toBe(0)
   })
+
+  it("keeps ticking when run creation loses the device race", async () => {
+    const t = await task("race")
+    const { body } = await create({
+      taskId: t,
+      deviceSerial: "A",
+      intervalSeconds: 20,
+    })
+    const id = body.schedule.id as string
+    const { createRun } = await import("@/lib/runs/service")
+    const service = await import("@/lib/runs/service")
+    const original = service.createRun
+    Object.defineProperty(service, "createRun", {
+      value: async () => {
+        throw new Error("Device A is busy with another run")
+      },
+      configurable: true,
+    })
+    try {
+      await tick(id)
+    } finally {
+      Object.defineProperty(service, "createRun", {
+        value: original,
+        configurable: true,
+      })
+    }
+    void createRun
+    const runs = await runsFor(id)
+    expect(runs.map((r) => r.status)).toEqual(["skipped"])
+    expect(String(runs[0].skipReason)).toContain("busy")
+    expect(await pendingTicks(id)).toBe(1)
+  })
+
+  it("an exhausted schedule cannot be re-planned by enabling or lowering maxRuns", async () => {
+    const t = await task("exhausted")
+    const { body } = await create({
+      taskId: t,
+      deviceSerial: "A",
+      intervalSeconds: 10,
+      maxRuns: 1,
+    })
+    const id = body.schedule.id as string
+    await tick(id)
+    expect((await get(id)).enabled).toBe(false)
+    const re = await patch(id, { enabled: true })
+    expect(re.body.schedule.enabled).toBe(false)
+    expect(await pendingTicks(id)).toBe(0)
+    const raised = await patch(id, { enabled: true, maxRuns: 2 })
+    expect(raised.body.schedule.enabled).toBe(true)
+    expect(await pendingTicks(id)).toBe(1)
+    const lowered = await patch(id, { maxRuns: 1 })
+    expect(lowered.body.schedule.enabled).toBe(false)
+    expect(await pendingTicks(id)).toBe(0)
+    expect(await runsFor(id)).toHaveLength(1)
+  })
 })

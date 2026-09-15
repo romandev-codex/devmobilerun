@@ -2,7 +2,7 @@ import mongoose from "mongoose"
 import { GridFSBucket, ObjectId } from "mongodb"
 
 import { connectDb } from "@/lib/db"
-import { Run } from "@/lib/models/run"
+import { Run, type RunStatus } from "@/lib/models/run"
 import { RunEvent } from "@/lib/models/run-event"
 
 const BUCKET = "screenshots"
@@ -74,20 +74,48 @@ export async function deleteRunScreenshots(
 }
 
 /**
- * Keeps step screenshots only for the most recent `keepRuns` finished runs of a
- * task; older runs lose their images but keep their text events.
+ * Retention policy: images are kept only for the most recent `keepRuns`
+ * finished runs of a task (by finish time); older finished runs lose their
+ * images but keep their text events. Runs still queued or running are never
+ * touched and never occupy a retention slot. With no task, every task is
+ * processed (used when the setting changes).
  */
-export async function pruneTaskScreenshots(
-  taskId: mongoose.Types.ObjectId,
+export async function applyScreenshotRetention(
+  taskId: mongoose.Types.ObjectId | null,
   keepRuns: number
 ): Promise<number> {
   await connectDb()
-  const runs = await Run.find({ taskId, status: { $ne: "skipped" } })
-    .sort({ createdAt: -1 })
-    .select("_id")
-    .lean<{ _id: mongoose.Types.ObjectId }[]>()
-  const stale = runs.slice(Math.max(0, keepRuns))
+  const finishedStatuses: RunStatus[] = [
+    "succeeded",
+    "failed",
+    "cancelled",
+    "lost",
+  ]
+  const taskIds = taskId
+    ? [taskId]
+    : await Run.distinct("taskId", { status: { $in: finishedStatuses } })
   let deleted = 0
-  for (const r of stale) deleted += await deleteRunScreenshots(r._id)
+  for (const id of taskIds) {
+    const finished = await Run.find({
+      taskId: id,
+      status: { $in: finishedStatuses },
+    })
+      .sort({ finishedAt: -1, _id: -1 })
+      .select("_id")
+      .lean<{ _id: mongoose.Types.ObjectId }[]>()
+    const stale = finished.slice(Math.max(0, keepRuns)).map((r) => r._id)
+    if (stale.length === 0) continue
+    // Only runs that still hold files need work.
+    const b = await bucket()
+    const holding = await b
+      .find({ "metadata.runId": { $in: stale } })
+      .project({ "metadata.runId": 1 })
+      .toArray()
+    const ids = new Set(
+      holding.map((f) => String((f.metadata as { runId: unknown }).runId))
+    )
+    for (const r of stale)
+      if (ids.has(String(r))) deleted += await deleteRunScreenshots(r)
+  }
   return deleted
 }

@@ -35,6 +35,9 @@ class FakeFramework:
             RunEvent("result", {"success": True, "reason": "Done", "steps": 2}),
         ]
         self.cancelled: list[str] = []
+        # When true the fake agent ignores task cancellation and still emits its
+        # scripted terminal event, like a workflow that finishes during a cooperative cancel.
+        self.swallow_cancel = False
 
     def version(self) -> str:
         return "9.9.9-fake"
@@ -67,7 +70,11 @@ class FakeAgentRun:
     async def events(self) -> AsyncIterator[RunEvent]:
         for item in self.script:
             if isinstance(item, float):
-                await asyncio.sleep(item)
+                try:
+                    await asyncio.sleep(item)
+                except asyncio.CancelledError:
+                    if not self.framework.swallow_cancel:
+                        raise
             else:
                 yield item
 

@@ -152,4 +152,59 @@ describe("step screenshots", () => {
     })
     expect(gone.status).toBe(404)
   })
+
+  it("never counts or prunes runs still in progress, and re-applies when the setting changes", async () => {
+    const { Run } = await import("@/lib/models/run")
+    const { RunEvent } = await import("@/lib/models/run-event")
+    await Run.deleteMany({})
+    await RunEvent.deleteMany({})
+    await mongoose.connection.db!.collection("screenshots.files").deleteMany({})
+    await mongoose.connection
+      .db!.collection("screenshots.chunks")
+      .deleteMany({})
+    const { PATCH } = await import("@/app/api/settings/route")
+    const setRetention = (n: number) =>
+      PATCH(
+        new Request("http://app/x", {
+          method: "PATCH",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ screenshotRetentionRuns: n }),
+        }),
+        {}
+      )
+    await setRetention(1)
+    const taskId = await setup()
+    const finished = await runOnce(taskId)
+    // Two runs in flight for the same task: they must not push the finished run out of retention.
+    await Run.create([
+      {
+        taskId: new mongoose.Types.ObjectId(taskId),
+        taskName: "Shots",
+        deviceSerial: "emulator-5554",
+        status: "running",
+        trigger: "manual",
+        instruction: "x",
+        options: { vision: false, reasoning: false, maxSteps: 1 },
+      },
+      {
+        taskId: new mongoose.Types.ObjectId(taskId),
+        taskName: "Shots",
+        deviceSerial: "emulator-5554",
+        status: "queued",
+        trigger: "manual",
+        instruction: "x",
+        options: { vision: false, reasoning: false, maxSteps: 1 },
+      },
+    ])
+    const { applyScreenshotRetention } = await import("@/lib/runs/screenshots")
+    await applyScreenshotRetention(new mongoose.Types.ObjectId(taskId), 1)
+    expect(await fileCount()).toBe(2)
+    expect(
+      (await events(finished)).filter((e) => e.type === "screenshot")[0].payload
+        .fileId
+    ).toBeTruthy()
+
+    await setRetention(0)
+    expect(await fileCount()).toBe(0)
+  })
 })

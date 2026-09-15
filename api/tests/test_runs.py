@@ -143,3 +143,32 @@ async def test_prompts_and_app_cards_reach_the_agent(client, framework):
     spec = framework.specs[-1]
     assert spec.prompts == {"manager_system": "Be terse."}
     assert spec.app_cards == [{"packageName": "com.example", "name": "Example", "content": "Tap login"}]
+
+
+async def test_stop_wins_over_a_result_the_agent_emits_while_stopping(client, framework):
+    """A cooperative cancel may let the workflow finish with a result first; the
+    subscriber must still see the run as cancelled."""
+    framework.swallow_cancel = True
+    framework.script = [
+        RunEvent("thought", {"text": "working"}),
+        0.2,
+        RunEvent("result", {"success": False, "reason": "interrupted", "steps": 1}),
+    ]
+    await client.post("/runs", json=start_body(run_id="racy"))
+    await asyncio.sleep(0.05)
+    assert (await client.post("/runs/racy/stop")).status_code == 202
+    events = await collect_events(client, "racy")
+    assert [e.event for e in events] == ["started", "thought", "cancelled"]
+    assert framework.cancelled == ["racy"]
+
+
+async def test_replay_keeps_images_only_for_recent_screenshots(client, framework):
+    framework.script = [RunEvent("screenshot", {"step": i, "png": "QUJD"}) for i in range(8)] + [
+        RunEvent("result", {"success": True, "reason": "", "steps": 8})
+    ]
+    await client.post("/runs", json=start_body(run_id="shots"))
+    await asyncio.sleep(0.05)
+    events = [e for e in await collect_events(client, "shots") if e.event == "screenshot"]
+    assert len(events) == 8
+    assert [("png" in e.data) for e in events] == [False, False, False, True, True, True, True, True]
+    assert events[0].data["pruned"] is True

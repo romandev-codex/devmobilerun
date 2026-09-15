@@ -28,6 +28,11 @@ function codeForStatus(status: number): ExecutorErrorCode {
   return "http"
 }
 
+/** Joins a base URL (which may carry a path prefix) with an absolute route path. */
+export function joinUrl(base: string, path: string): string {
+  return base.replace(/\/+$/, "") + (path.startsWith("/") ? path : `/${path}`)
+}
+
 /** Performs a request against the executor, translating failures into ExecutorError. */
 export async function executorFetch(
   path: string,
@@ -38,7 +43,7 @@ export async function executorFetch(
   headers.set("X-Mobilerun-Token", env.EXECUTOR_TOKEN)
   let res: Response
   try {
-    res = await fetch(new URL(path, env.EXECUTOR_URL), {
+    res = await fetch(joinUrl(env.EXECUTOR_URL, path), {
       ...init,
       headers,
       cache: "no-store",
