@@ -3,6 +3,8 @@ import type mongoose from "mongoose"
 import { connectDb } from "@/lib/db"
 import { executor, ExecutorError } from "@/lib/executor/client"
 import { Run } from "@/lib/models/run"
+import { pruneTaskScreenshots, storeScreenshot } from "@/lib/runs/screenshots"
+import { getSettings } from "@/lib/settings"
 import {
   acquireDeviceLock,
   appendRunEvent,
@@ -74,6 +76,12 @@ export async function executeRun(runId: string): Promise<void> {
     await finishRun(run._id, { status: "failed", error: message })
   } finally {
     await releaseDeviceLock(run.deviceSerial, run._id)
+    try {
+      const { screenshotRetentionRuns } = await getSettings()
+      await pruneTaskScreenshots(run.taskId, screenshotRetentionRuns)
+    } catch (err) {
+      console.error("[run-task] screenshot pruning failed", err)
+    }
   }
 }
 
@@ -91,7 +99,7 @@ async function tailEvents(runId: mongoose.Types.ObjectId): Promise<boolean> {
     await appendRunEvent(runId, {
       seq,
       type: msg.event,
-      payload: storablePayload(msg.event, payload),
+      payload: await storablePayload(runId, seq, msg.event, payload),
     })
 
     if (msg.event === "result") {
@@ -121,13 +129,30 @@ async function tailEvents(runId: mongoose.Types.ObjectId): Promise<boolean> {
   return false
 }
 
-/** Screenshot bytes are not stored inline; image persistence is handled separately. */
-function storablePayload(
+/**
+ * Screenshot bytes go to GridFS; the event keeps the step index and file id.
+ * Everything else is stored as received.
+ */
+async function storablePayload(
+  runId: mongoose.Types.ObjectId,
+  seq: number,
   type: string,
   payload: Record<string, unknown>
-): Record<string, unknown> {
+): Promise<Record<string, unknown>> {
   if (type !== "screenshot") return payload
-  const rest = { ...payload }
-  delete rest.png
-  return rest
+  const step = Number(payload.step ?? 0)
+  const png = typeof payload.png === "string" ? payload.png : null
+  if (!png) return { step, fileId: null }
+  try {
+    const fileId = await storeScreenshot(
+      runId,
+      seq,
+      step,
+      Buffer.from(png, "base64")
+    )
+    return { step, fileId }
+  } catch (err) {
+    console.error("[run-task] could not store screenshot", err)
+    return { step, fileId: null }
+  }
 }

@@ -15,7 +15,15 @@ const TERMINAL = new Set([
   "skipped",
 ])
 
-function EventRow({ ev }: { ev: RunEventView }) {
+function EventRow({
+  ev,
+  selected,
+  onSelect,
+}: {
+  ev: RunEventView
+  selected?: boolean
+  onSelect?: () => void
+}) {
   const p = ev.payload as Record<string, unknown>
   const time = new Date(ev.at).toLocaleTimeString()
   const base =
@@ -86,15 +94,25 @@ function EventRow({ ev }: { ev: RunEventView }) {
       )
     case "screenshot":
       return (
-        <div className={base}>
+        <button
+          type="button"
+          onClick={onSelect}
+          className={cn(
+            base,
+            "w-full text-left",
+            selected && "bg-muted/60",
+            p.pruned ? "cursor-default" : "hover:bg-muted/40"
+          )}
+        >
           <span className="font-mono text-xs text-muted-foreground">
             {time}
           </span>
           <span className="text-xs text-muted-foreground">screen</span>
-          <p className="text-xs text-muted-foreground">
-            Screenshot for step {String(p.step ?? "?")}
-          </p>
-        </div>
+          <span className="text-xs text-muted-foreground">
+            Step {String(p.step ?? "?")}
+            {p.pruned ? " (image pruned)" : ""}
+          </span>
+        </button>
       )
     case "result":
       return (
@@ -144,6 +162,7 @@ export function RunTimeline({
 }) {
   const [run, setRun] = useState(initialRun)
   const [events, setEvents] = useState<RunEventView[]>(initialEvents)
+  const [selectedSeq, setSelectedSeq] = useState<number | null>(null)
   const [connection, setConnection] = useState<
     "connecting" | "live" | "closed"
   >(() => (TERMINAL.has(initialRun.status) ? "closed" : "connecting"))
@@ -200,6 +219,14 @@ export function RunTimeline({
     bottomRef.current?.scrollIntoView({ block: "end" })
   }, [events.length])
 
+  const shots = events.filter(
+    (e) => e.type === "screenshot" && e.payload.fileId
+  )
+  const current =
+    (selectedSeq !== null && shots.find((e) => e.seq === selectedSeq)) ||
+    shots[shots.length - 1] ||
+    null
+
   return (
     <div className="grid gap-4">
       <RunResultBanner run={run} />
@@ -214,18 +241,65 @@ export function RunTimeline({
               : "finished"}
         </span>
       </div>
-      <div className="rounded-md border px-3">
-        {events.length === 0 ? (
-          <p className="py-6 text-center text-sm text-muted-foreground">
-            {run.status === "queued"
-              ? "Waiting for the run to start…"
-              : "No events recorded."}
-          </p>
-        ) : (
-          events.map((ev) => <EventRow key={ev.seq} ev={ev} />)
-        )}
-        <div ref={bottomRef} />
+      <div className="grid gap-4 md:grid-cols-[minmax(0,1fr)_16rem]">
+        <div className="rounded-md border px-3">
+          {events.length === 0 ? (
+            <p className="py-6 text-center text-sm text-muted-foreground">
+              {run.status === "queued"
+                ? "Waiting for the run to start…"
+                : "No events recorded."}
+            </p>
+          ) : (
+            events.map((ev) => (
+              <EventRow
+                key={ev.seq}
+                ev={ev}
+                selected={current?.seq === ev.seq}
+                onSelect={
+                  ev.type === "screenshot" && ev.payload.fileId
+                    ? () => setSelectedSeq(ev.seq)
+                    : undefined
+                }
+              />
+            ))
+          )}
+          <div ref={bottomRef} />
+        </div>
+        <RunScreen runId={run.id} shot={current} />
       </div>
+    </div>
+  )
+}
+
+function RunScreen({
+  runId,
+  shot,
+}: {
+  runId: string
+  shot: RunEventView | null
+}) {
+  return (
+    <div className="md:sticky md:top-6 md:self-start">
+      <div className="flex aspect-[9/16] w-full items-center justify-center overflow-hidden rounded-md border bg-muted">
+        {shot ? (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img
+            src={`/api/runs/${runId}/screenshots/${shot.seq}`}
+            alt={`Step ${String(shot.payload.step ?? "")}`}
+            className="h-full w-full object-contain"
+          />
+        ) : (
+          <span className="px-4 text-center text-xs text-muted-foreground">
+            No screenshot yet
+          </span>
+        )}
+      </div>
+      {shot ? (
+        <p className="mt-1 text-center text-xs text-muted-foreground">
+          Step {String(shot.payload.step ?? "")} ·{" "}
+          {new Date(shot.at).toLocaleTimeString()}
+        </p>
+      ) : null}
     </div>
   )
 }

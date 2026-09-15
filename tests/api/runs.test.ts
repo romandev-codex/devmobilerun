@@ -209,7 +209,9 @@ describe("executeRun", () => {
       "action",
       "result",
     ])
-    expect(events[3].payload).toEqual({ step: 0 })
+    expect(events[3].payload).toMatchObject({ step: 0 })
+    expect(events[3].payload.fileId).toBeTruthy()
+    expect(events[3].payload.png).toBeUndefined()
     expect(events[4].payload.tool).toBe("tap")
 
     expect(startBodies[0]).toMatchObject({
