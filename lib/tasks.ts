@@ -3,6 +3,8 @@ import { z } from "zod"
 
 import { notFound } from "@/lib/api/errors"
 import { asObjectId as toObjectId, connectDb } from "@/lib/db"
+import { Run } from "@/lib/models/run"
+import { Schedule } from "@/lib/models/schedule"
 import { Task, type TaskDoc } from "@/lib/models/task"
 
 const asObjectId = (id: string, what = "Task") => toObjectId(id, what)
@@ -126,32 +128,25 @@ type LastRunRow = {
 }
 type CountRow = { _id: mongoose.Types.ObjectId; n: number }
 
-/** Latest run and schedule count per task, read from the raw collections. */
+/** Latest run and schedule count per task. */
 async function taskRelations(ids: mongoose.Types.ObjectId[]) {
-  const db = mongoose.connection.db!
   const [runs, schedules] = await Promise.all([
-    db
-      .collection("runs")
-      .aggregate<LastRunRow>([
-        { $match: { taskId: { $in: ids } } },
-        { $sort: { createdAt: -1 } },
-        {
-          $group: {
-            _id: "$taskId",
-            runId: { $first: "$_id" },
-            status: { $first: "$status" },
-            at: { $first: "$createdAt" },
-          },
+    Run.aggregate<LastRunRow>([
+      { $match: { taskId: { $in: ids } } },
+      { $sort: { taskId: 1, createdAt: -1 } },
+      {
+        $group: {
+          _id: "$taskId",
+          runId: { $first: "$_id" },
+          status: { $first: "$status" },
+          at: { $first: "$createdAt" },
         },
-      ])
-      .toArray(),
-    db
-      .collection("schedules")
-      .aggregate<CountRow>([
-        { $match: { taskId: { $in: ids } } },
-        { $group: { _id: "$taskId", n: { $sum: 1 } } },
-      ])
-      .toArray(),
+      },
+    ]),
+    Schedule.aggregate<CountRow>([
+      { $match: { taskId: { $in: ids } } },
+      { $group: { _id: "$taskId", n: { $sum: 1 } } },
+    ]),
   ])
   return {
     lastRun: new Map(runs.map((r) => [r._id.toString(), r])),
@@ -249,14 +244,15 @@ export async function deleteTask(
   const oid = asObjectId(id)
   const res = await Task.deleteOne({ _id: oid })
   if (res.deletedCount === 0) throw notFound("Task")
-  const schedules = mongoose.connection.db!.collection("schedules")
   const ids = (
-    await schedules.find({ taskId: oid }).project({ _id: 1 }).toArray()
-  ).map((s) => s._id as mongoose.Types.ObjectId)
+    await Schedule.find({ taskId: oid })
+      .select("_id")
+      .lean<{ _id: mongoose.Types.ObjectId }[]>()
+  ).map((s) => s._id)
   if (ids.length > 0) {
     const { cancelSchedulesJobs } = await import("@/lib/schedules")
     await cancelSchedulesJobs(ids)
-    await schedules.deleteMany({ _id: { $in: ids } })
+    await Schedule.deleteMany({ _id: { $in: ids } })
   }
   return { deletedSchedules: ids.length }
 }

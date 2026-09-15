@@ -77,6 +77,9 @@ const runSchema = new Schema(
   { timestamps: true }
 )
 
+runSchema.index({ taskId: 1, createdAt: -1 })
+runSchema.index({ deviceSerial: 1, _id: -1 })
+
 export type RunDoc = InferSchemaType<typeof runSchema> & {
   _id: mongoose.Types.ObjectId
   createdAt: Date

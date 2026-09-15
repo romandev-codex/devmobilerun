@@ -58,17 +58,34 @@ export const updateScheduleSchema = z
   .partial()
   .refine((v) => Object.keys(v).length > 0, { message: "No fields provided" })
 
-async function toView(doc: ScheduleDoc): Promise<ScheduleView> {
-  const [task, lastRun] = await Promise.all([
-    Task.findById(doc.taskId).select("name").lean<{ name: string }>(),
-    doc.lastRunId
-      ? Run.findById(doc.lastRunId).select("status").lean<{ status: string }>()
-      : null,
+type Related = {
+  taskNames: Map<string, string>
+  runStatuses: Map<string, string>
+}
+
+/** One query per collection for a whole page of schedules, instead of two per row. */
+async function relatedFor(docs: ScheduleDoc[]): Promise<Related> {
+  const taskIds = [...new Set(docs.map((d) => d.taskId.toString()))]
+  const runIds = docs.flatMap((d) => (d.lastRunId ? [d.lastRunId] : []))
+  const [tasks, runs] = await Promise.all([
+    Task.find({ _id: { $in: taskIds } })
+      .select("name")
+      .lean<{ _id: mongoose.Types.ObjectId; name: string }[]>(),
+    Run.find({ _id: { $in: runIds } })
+      .select("status")
+      .lean<{ _id: mongoose.Types.ObjectId; status: string }[]>(),
   ])
+  return {
+    taskNames: new Map(tasks.map((t) => [t._id.toString(), t.name])),
+    runStatuses: new Map(runs.map((r) => [r._id.toString(), r.status])),
+  }
+}
+
+function toView(doc: ScheduleDoc, related: Related): ScheduleView {
   return {
     id: doc._id.toString(),
     taskId: doc.taskId.toString(),
-    taskName: task?.name ?? "(deleted task)",
+    taskName: related.taskNames.get(doc.taskId.toString()) ?? "(deleted task)",
     deviceSerial: doc.deviceSerial,
     intervalSeconds: doc.intervalSeconds,
     maxRuns: doc.maxRuns ?? null,
@@ -76,7 +93,9 @@ async function toView(doc: ScheduleDoc): Promise<ScheduleView> {
     runCount: doc.runCount,
     lastRunId: doc.lastRunId ? doc.lastRunId.toString() : null,
     lastRunAt: doc.lastRunAt ? doc.lastRunAt.toISOString() : null,
-    lastRunStatus: lastRun?.status ?? null,
+    lastRunStatus: doc.lastRunId
+      ? (related.runStatuses.get(doc.lastRunId.toString()) ?? null)
+      : null,
     nextRunAt: doc.nextRunAt ? doc.nextRunAt.toISOString() : null,
     createdAt: doc.createdAt.toISOString(),
     updatedAt: doc.updatedAt.toISOString(),
@@ -167,14 +186,15 @@ export async function listSchedules(
   const docs = await Schedule.find(q)
     .sort({ createdAt: -1 })
     .lean<ScheduleDoc[]>()
-  return Promise.all(docs.map(toView))
+  const related = await relatedFor(docs)
+  return docs.map((d) => toView(d, related))
 }
 
 export async function getSchedule(id: string): Promise<ScheduleView> {
   await connectDb()
   const doc = await Schedule.findById(asObjectId(id)).lean<ScheduleDoc>()
   if (!doc) throw notFound("Schedule")
-  return toView(doc)
+  return toView(doc, await relatedFor([doc]))
 }
 
 export async function createSchedule(input: unknown): Promise<ScheduleView> {
