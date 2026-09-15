@@ -21,13 +21,41 @@ const globalForAgenda = globalThis as unknown as {
   __agendaStarted?: Promise<void>
 }
 
+type Db = NonNullable<typeof mongoose.connection.db>
+
+/**
+ * @hokify/agenda is written for mongodb driver v4, where findOneAndUpdate resolves to
+ * `{ value, lastErrorObject }`. Driver v6+ resolves to the document unless
+ * `includeResultMetadata` is set, which makes Agenda read `.value` of null while polling.
+ */
+function withLegacyFindOneAndUpdate(db: Db): Db {
+  return new Proxy(db, {
+    get(target, prop, receiver) {
+      if (prop !== "collection") return Reflect.get(target, prop, receiver)
+      return (...args: Parameters<Db["collection"]>) => {
+        const collection = target.collection(...args)
+        return new Proxy(collection, {
+          get(col, key, rcv) {
+            if (key !== "findOneAndUpdate") {
+              const value = Reflect.get(col, key, rcv)
+              return typeof value === "function" ? value.bind(col) : value
+            }
+            return (filter: object, update: object, options: object = {}) =>
+              col.findOneAndUpdate(filter, update, { ...options, includeResultMetadata: true })
+          },
+        })
+      }
+    },
+  })
+}
+
 /** One Agenda per process, bound to the shared Mongoose connection. */
 export async function getAgenda(): Promise<Agenda> {
   await connectDb()
   if (globalForAgenda.__agenda) return globalForAgenda.__agenda
   const agenda = new Agenda({
     // Agenda types its Db against its own (older) mongodb typings; the runtime object is the same driver Db.
-    mongo: mongoose.connection.db as unknown as never,
+    mongo: withLegacyFindOneAndUpdate(mongoose.connection.db!) as unknown as never,
     db: { collection: "agendaJobs" },
     processEvery: "2 seconds",
     ensureIndex: true,
