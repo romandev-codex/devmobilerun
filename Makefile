@@ -1,14 +1,16 @@
 # mobilerun app: one command to run the whole stack in development.
 #
 #   make setup   install Node and Python dependencies, create .env if missing
-#   make dev     start MongoDB, the executor and the Next.js app together
-#   make stop    stop the MongoDB started by `make dev`
+#   make dev     start the executor and the Next.js app together
+#   make mongo   start MongoDB (only if you are not running it yourself)
+#   make stop    stop the MongoDB started by `make mongo`
 #   make test    run both test suites
 #   make check   typecheck, lint and both test suites
 #
-# MongoDB is started with Docker Compose when Docker is available, otherwise
-# with Homebrew's mongodb-community service. The executor always runs on the
-# host so it can see USB phones.
+# `make dev` assumes MongoDB is already reachable at MONGODB_URI. Use `make mongo`
+# to start one with Docker Compose when Docker is available, otherwise with
+# Homebrew's mongodb-community service. The executor always runs on the host so
+# it can see USB phones.
 
 SHELL := /bin/bash
 .DEFAULT_GOAL := help
@@ -27,7 +29,7 @@ HAS_DOCKER := $(shell command -v docker >/dev/null 2>&1 && docker info >/dev/nul
 .PHONY: help setup env mongo mongo-stop executor app dev stop test test-app test-executor check clean
 
 help:
-	@sed -n 's/^#   \(.*\)/\1/p' $(MAKEFILE_LIST) | head -5
+	@sed -n 's/^#   \(.*\)/\1/p' $(MAKEFILE_LIST) | head -6
 
 env:
 	@test -f $(ENV_FILE) || (cp .env.example $(ENV_FILE) && echo "created $(ENV_FILE); set EXECUTOR_TOKEN in it")
@@ -59,7 +61,7 @@ app:
 	npm run dev
 
 # Runs the executor and the app in the foreground; Ctrl+C stops both.
-dev: env mongo
+dev: env
 	@trap 'kill 0' INT TERM EXIT; \
 	  (cd api && uv run mobilerun-executor) & \
 	  npm run dev & \
