@@ -2,13 +2,15 @@ import mongoose from "mongoose"
 import { z } from "zod"
 
 import { notFound } from "@/lib/api/errors"
-import { connectDb } from "@/lib/db"
+import { asObjectId as toObjectId, connectDb } from "@/lib/db"
 import { syncDevices } from "@/lib/devices"
 import { Device } from "@/lib/models/device"
 import { Run } from "@/lib/models/run"
 import { Schedule, type ScheduleDoc } from "@/lib/models/schedule"
 import { Task } from "@/lib/models/task"
 import { createRun, createSkippedRun } from "@/lib/runs/service"
+
+const asObjectId = (id: string, what = "Schedule") => toObjectId(id, what)
 
 export const SCHEDULE_TICK_JOB = "schedule-tick"
 export type ScheduleTickData = { scheduleId: string }
@@ -55,11 +57,6 @@ export const updateScheduleSchema = z
   })
   .partial()
   .refine((v) => Object.keys(v).length > 0, { message: "No fields provided" })
-
-function asObjectId(id: string, what = "Schedule"): mongoose.Types.ObjectId {
-  if (!mongoose.isValidObjectId(id)) throw notFound(what)
-  return new mongoose.Types.ObjectId(id)
-}
 
 async function toView(doc: ScheduleDoc): Promise<ScheduleView> {
   const [task, lastRun] = await Promise.all([

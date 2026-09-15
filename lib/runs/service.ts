@@ -2,7 +2,7 @@ import mongoose from "mongoose"
 import { z } from "zod"
 
 import { conflict, notFound } from "@/lib/api/errors"
-import { connectDb } from "@/lib/db"
+import { asObjectId as toObjectId, connectDb } from "@/lib/db"
 import { Device } from "@/lib/models/device"
 import {
   Run,
@@ -87,10 +87,7 @@ export function isTerminal(status: RunStatus): boolean {
   return TERMINAL_RUN_STATUSES.includes(status)
 }
 
-function asObjectId(id: string, what = "Run"): mongoose.Types.ObjectId {
-  if (!mongoose.isValidObjectId(id)) throw notFound(what)
-  return new mongoose.Types.ObjectId(id)
-}
+const asObjectId = (id: string, what = "Run") => toObjectId(id, what)
 
 export const runNowSchema = z.object({ deviceSerial: z.string().trim().min(1) })
 

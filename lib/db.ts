@@ -1,5 +1,6 @@
 import mongoose from "mongoose"
 
+import { notFound } from "@/lib/api/errors"
 import { getEnv } from "@/lib/env"
 
 type Cached = { conn?: Promise<typeof mongoose>; uri?: string }
@@ -31,4 +32,10 @@ export async function disconnectDb(): Promise<void> {
     cached.conn = undefined
     cached.uri = undefined
   }
+}
+
+/** Parses a route id into an ObjectId, or throws the 404 for `what`. */
+export function asObjectId(id: string, what: string): mongoose.Types.ObjectId {
+  if (!mongoose.isValidObjectId(id)) throw notFound(what)
+  return new mongoose.Types.ObjectId(id)
 }

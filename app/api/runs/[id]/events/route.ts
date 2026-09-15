@@ -1,3 +1,5 @@
+import { setTimeout as sleepFor } from "node:timers/promises"
+
 import { route } from "@/lib/api/route"
 import { getRun, isTerminal, listRunEvents } from "@/lib/runs/service"
 
@@ -30,13 +32,7 @@ export const GET = route<Ctx>(async (req, { params }) => {
         )
       }
       const sleep = (ms: number) =>
-        new Promise<void>((resolve) => {
-          const t = setTimeout(resolve, ms)
-          req.signal.addEventListener("abort", () => {
-            clearTimeout(t)
-            resolve()
-          })
-        })
+        sleepFor(ms, undefined, { signal: req.signal }).catch(() => undefined)
 
       try {
         send("status", run)

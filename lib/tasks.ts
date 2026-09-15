@@ -2,8 +2,10 @@ import mongoose from "mongoose"
 import { z } from "zod"
 
 import { notFound } from "@/lib/api/errors"
-import { connectDb } from "@/lib/db"
+import { asObjectId as toObjectId, connectDb } from "@/lib/db"
 import { Task, type TaskDoc } from "@/lib/models/task"
+
+const asObjectId = (id: string, what = "Task") => toObjectId(id, what)
 
 export const taskStartSchema = z.discriminatedUnion("type", [
   z.object({
@@ -102,11 +104,6 @@ export function toTaskView(doc: TaskDoc): TaskView {
     createdAt: doc.createdAt.toISOString(),
     updatedAt: doc.updatedAt.toISOString(),
   }
-}
-
-function asObjectId(id: string): mongoose.Types.ObjectId {
-  if (!mongoose.isValidObjectId(id)) throw notFound("Task")
-  return new mongoose.Types.ObjectId(id)
 }
 
 type LastRunRow = {
