@@ -206,3 +206,43 @@ export async function appendRunEvent(
     if ((err as { code?: number }).code !== 11000) throw err
   }
 }
+
+/**
+ * Stops a run. A queued run is cancelled locally; a running one is stopped on
+ * the executor and the job tailing its stream records the cancellation. If the
+ * executor no longer knows the run (it restarted), the run is cancelled locally.
+ */
+export async function stopRun(id: string): Promise<RunView> {
+  await connectDb()
+  const run = await Run.findById(asObjectId(id))
+  if (!run) throw notFound("Run")
+  if (isTerminal(run.status)) throw conflict(`Run is already ${run.status}`)
+
+  if (run.status === "queued") {
+    await finishRun(run._id, { status: "cancelled", error: null })
+    await releaseDeviceLock(run.deviceSerial, run._id)
+    return getRun(id)
+  }
+
+  const { executor, ExecutorError } = await import("@/lib/executor/client")
+  try {
+    await executor.stopRun(run._id.toString())
+  } catch (err) {
+    if (
+      err instanceof ExecutorError &&
+      (err.code === "not_found" || err.code === "unreachable")
+    ) {
+      await finishRun(run._id, {
+        status: "cancelled",
+        error:
+          err.code === "unreachable"
+            ? "Executor unreachable; cancelled locally"
+            : null,
+      })
+      await releaseDeviceLock(run.deviceSerial, run._id)
+    } else {
+      throw err
+    }
+  }
+  return getRun(id)
+}

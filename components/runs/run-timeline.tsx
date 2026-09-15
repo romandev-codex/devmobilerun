@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react"
 
 import { RunResultBanner } from "@/components/runs/run-summary"
 import { RunStatusBadge } from "@/components/runs/run-status-badge"
+import { StopRunButton } from "@/components/runs/stop-run-button"
 import type { RunEventView, RunView } from "@/lib/runs/service"
 import { cn } from "@/lib/utils"
 
@@ -233,6 +234,7 @@ export function RunTimeline({
       <div className="flex items-center justify-between">
         <h2 className="text-sm font-medium">Timeline</h2>
         <span className="flex items-center gap-2 text-xs text-muted-foreground">
+          {!TERMINAL.has(run.status) ? <StopRunButton runId={run.id} /> : null}
           <RunStatusBadge status={run.status} />
           {connection === "live"
             ? "live"
