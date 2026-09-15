@@ -172,3 +172,80 @@ async def test_replay_keeps_images_only_for_recent_screenshots(client, framework
     assert len(events) == 8
     assert [("png" in e.data) for e in events] == [False, False, False, True, True, True, True, True]
     assert events[0].data["pruned"] is True
+
+
+async def test_heartbeats_do_not_end_the_stream(client, framework, monkeypatch):
+    from executor.routers import runs as runs_router
+
+    monkeypatch.setattr(runs_router, "HEARTBEAT_SECONDS", 0.05)
+    framework.script = [
+        RunEvent("thought", {"text": "slow model"}),
+        0.3,
+        RunEvent("result", {"success": True, "reason": "done", "steps": 1}),
+    ]
+    await client.post("/runs", json=start_body(run_id="quiet"))
+    async with client.stream("GET", "/runs/quiet/events") as res:
+        text = "".join([chunk async for chunk in res.aiter_text()])
+    assert text.count(": keep-alive") >= 2
+    assert [e.event for e in parse_sse(text)] == ["started", "thought", "result"]
+
+
+async def test_events_published_during_replay_are_not_lost(framework):
+    """A subscriber that is still replaying when the run finishes must see the tail."""
+    from executor.runs import RunManager
+
+    manager = RunManager(framework)
+    framework.script = [RunEvent("thought", {"text": "t%d" % i}) for i in range(3)] + [30.0]
+    await manager.start(__import__("executor.framework", fromlist=["RunSpec"]).RunSpec(
+        run_id="replay", device_serial="emulator-5554", instruction="x"
+    ))
+    await asyncio.sleep(0.05)  # thoughts are buffered; the fake never emits a result
+    run = manager.get("replay")
+    assert not run.done
+    events = manager.subscribe("replay")
+    first = await events.__anext__()
+    assert first.event.type == "started"
+    # Published while the subscriber is mid-replay, including the terminal event.
+    run.publish(RunEvent("action", {"tool": "tap"}))
+    run.publish(RunEvent("result", {"success": True, "reason": "", "steps": 3}))
+    rest = [item async for item in events]
+    assert [i.event.type for i in rest] == ["thought", "thought", "thought", "action", "result"]
+    assert [i.seq for i in rest] == [1, 2, 3, 4, 5]
+    await manager.stop("replay")
+
+
+async def test_concurrent_starts_for_one_device_admit_only_one(framework):
+    from executor.framework import RunSpec
+    from executor.runs import DeviceBusy, RunManager
+
+    original = framework.list_devices
+
+    async def slow_list():
+        await asyncio.sleep(0.05)
+        return await original()
+
+    framework.list_devices = slow_list  # type: ignore[assignment]
+    framework.script = [30.0, RunEvent("result", {"success": True, "reason": "", "steps": 1})]
+    manager = RunManager(framework)
+    results = await asyncio.gather(
+        manager.start(RunSpec(run_id="one", device_serial="emulator-5554", instruction="x")),
+        manager.start(RunSpec(run_id="two", device_serial="emulator-5554", instruction="x")),
+        return_exceptions=True,
+    )
+    assert sum(isinstance(r, DeviceBusy) for r in results) == 1
+    assert len(manager.active()) == 1
+    for r in manager.active():
+        await manager.stop(r.spec.run_id)
+
+
+async def test_run_id_may_be_reused_after_the_run_finished(client, framework):
+    assert (await client.post("/runs", json=start_body(run_id="again"))).status_code == 202
+    await collect_events(client, "again")
+    assert (await client.post("/runs", json=start_body(run_id="again"))).status_code == 202
+    await collect_events(client, "again")
+    framework.script = [5.0, RunEvent("result", {"success": True, "reason": "", "steps": 1})]
+    assert (await client.post("/runs", json=start_body(run_id="live"))).status_code == 202
+    res = await client.post("/runs", json=start_body(run_id="live"))
+    assert res.status_code == 409
+    assert res.json()["error"]["code"] == "run_exists"
+    await client.post("/runs/live/stop")

@@ -95,7 +95,11 @@ class MobilerunFramework:
             for role, profile in sorted(config.llm_profiles.items())
         ]
         env_path = os.environ.get("MOBILERUN_CONFIG")
-        config_path = env_path if env_path else str(ConfigLoader.get_user_config_path())
+        # Mirror the loader: the env path counts only when the file exists.
+        if env_path and os.path.exists(env_path):
+            config_path = env_path
+        else:
+            config_path = str(ConfigLoader.get_user_config_path())
         return ConfigSummary(profiles=profiles, config_path=config_path)
 
     async def list_devices(self) -> list[DeviceInfo]:
@@ -117,11 +121,16 @@ class MobilerunFramework:
     async def screenshot(self, serial: str) -> bytes:
         from async_adbutils import adb
 
+        from async_adbutils.errors import AdbError
+
         try:
             device = await adb.device(serial=serial)
             return await device.screenshot_bytes()
-        except Exception as exc:  # noqa: BLE001 - adb reports missing/offline devices as errors
-            raise DeviceNotFound(serial) from exc
+        except AdbError as exc:
+            message = str(exc).lower()
+            if "not found" in message or "offline" in message or "unauthorized" in message:
+                raise DeviceNotFound(serial) from exc
+            raise
 
     async def open_url(self, serial: str, url: str) -> None:
         from async_adbutils import adb
@@ -189,6 +198,29 @@ def _jsonable(value: Any) -> Any:
         return repr(value)
 
 
+def compose_goal(spec: RunSpec) -> str:
+    """The instruction the agent receives.
+
+    The framework reads app cards only in reasoning mode (the manager agent);
+    in direct-execution mode the cards are folded into the instruction instead
+    so they still reach the model.
+    """
+    if spec.reasoning or not spec.app_cards:
+        return spec.instruction
+    sections = []
+    for card in spec.app_cards:
+        package = str(card.get("packageName") or "").strip()
+        content = str(card.get("content") or "").strip()
+        if not package or not content:
+            continue
+        name = str(card.get("name") or "").strip()
+        title = f"{name} ({package})" if name else package
+        sections.append(f"### {title}\n{content}")
+    if not sections:
+        return spec.instruction
+    return spec.instruction + "\n\nApp guidance:\n" + "\n\n".join(sections)
+
+
 class MobilerunAgentRun:
     """Drives a real MobileAgent and yields normalized events."""
 
@@ -202,44 +234,55 @@ class MobilerunAgentRun:
         from mobilerun.agent.droid import MobileAgent
         from mobilerun.config_manager import ConfigLoader
 
-        os.environ.setdefault("MOBILERUN_STREAM_SCREENSHOTS", "1")
-        spec = self.spec
-        config = ConfigLoader.load()
-        config.agent.max_steps = spec.max_steps
-        config.agent.reasoning = spec.reasoning
-        config.agent.fast_agent.vision = spec.vision
-        config.agent.manager.vision = spec.vision
-        config.agent.executor.vision = spec.vision
-        config.device.serial = spec.device_serial
-        config.logging.save_trajectory = "none"
+        import asyncio
+        import shutil
 
         from .app_cards import write_app_cards_dir
 
-        cards_dir = write_app_cards_dir(spec.app_cards)
-        if cards_dir is not None:
-            config.agent.app_cards.enabled = True
-            config.agent.app_cards.mode = "local"
-            config.agent.app_cards.app_cards_dir = str(cards_dir)
+        os.environ.setdefault("MOBILERUN_STREAM_SCREENSHOTS", "1")
+        spec = self.spec
+        cards_dir = write_app_cards_dir(spec.app_cards) if spec.reasoning else None
 
-        agent = MobileAgent(
-            goal=spec.instruction,
-            config=config,
-            variables=spec.variables or None,
-            prompts=spec.prompts or None,
-            timeout=max(600, spec.max_steps * 90),
-        )
-        handler = agent.run()
-        self._handler = handler
-        step_counter = [0]
-        async for raw in handler.stream_events():
-            mapped = map_framework_event(raw, step_counter)
-            if mapped is not None:
-                yield mapped
-        result = await handler
-        yield RunEvent(
-            "result",
-            {"success": bool(result.success), "reason": result.reason, "steps": int(result.steps)},
-        )
+        def build() -> "MobileAgent":
+            # Config loading and agent construction do file IO and LLM client setup;
+            # keep them off the event loop so other streams stay responsive.
+            config = ConfigLoader.load()
+            config.agent.max_steps = spec.max_steps
+            config.agent.reasoning = spec.reasoning
+            config.agent.fast_agent.vision = spec.vision
+            config.agent.manager.vision = spec.vision
+            config.agent.executor.vision = spec.vision
+            config.device.serial = spec.device_serial
+            config.logging.save_trajectory = "none"
+            if cards_dir is not None:
+                config.agent.app_cards.enabled = True
+                config.agent.app_cards.mode = "local"
+                config.agent.app_cards.app_cards_dir = str(cards_dir)
+            return MobileAgent(
+                goal=compose_goal(spec),
+                config=config,
+                variables=spec.variables or None,
+                prompts=spec.prompts or None,
+                timeout=max(600, spec.max_steps * 90),
+            )
+
+        try:
+            agent = await asyncio.to_thread(build)
+            handler = agent.run()
+            self._handler = handler
+            step_counter = [0]
+            async for raw in handler.stream_events():
+                mapped = map_framework_event(raw, step_counter)
+                if mapped is not None:
+                    yield mapped
+            result = await handler
+            yield RunEvent(
+                "result",
+                {"success": bool(result.success), "reason": result.reason, "steps": int(result.steps)},
+            )
+        finally:
+            if cards_dir is not None:
+                shutil.rmtree(cards_dir, ignore_errors=True)
 
     async def cancel(self) -> None:
         if self._handler is not None:

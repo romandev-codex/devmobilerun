@@ -35,6 +35,12 @@ class RunNotFound(Exception):
     pass
 
 
+class RunExists(Exception):
+    def __init__(self, run_id: str) -> None:
+        super().__init__(f"Run {run_id} is already active")
+        self.run_id = run_id
+
+
 @dataclass(frozen=True)
 class SeqEvent:
     seq: int
@@ -118,17 +124,27 @@ class RunManager:
     # ── lifecycle ──────────────────────────────────────────────────────
     async def start(self, spec: RunSpec) -> ActiveRun:
         self._sweep()
-        if spec.run_id in self._runs:
-            raise DeviceBusy(spec.device_serial, spec.run_id)
+        existing = self._runs.get(spec.run_id)
+        if existing is not None:
+            if not existing.done:
+                raise RunExists(spec.run_id)
+            del self._runs[spec.run_id]  # a finished run kept for replay; the id may be reused
         busy = self._busy_run_for(spec.device_serial)
         if busy is not None:
             raise DeviceBusy(spec.device_serial, busy.spec.run_id)
-        devices = await self._framework.list_devices()
-        if not any(d.serial == spec.device_serial and d.state == "device" for d in devices):
-            raise DeviceNotFound(spec.device_serial)
 
+        # Register before the adb round trip so a concurrent start for the same
+        # device sees this run as busy; withdraw it if the device is not connected.
         run = ActiveRun(spec=spec, started_at=time.time())
         self._runs[spec.run_id] = run
+        try:
+            devices = await self._framework.list_devices()
+        except Exception:
+            del self._runs[spec.run_id]
+            raise
+        if not any(d.serial == spec.device_serial and d.state == "device" for d in devices):
+            del self._runs[spec.run_id]
+            raise DeviceNotFound(spec.device_serial)
         run.task = asyncio.create_task(self._execute(run), name=f"run-{spec.run_id}")
         return run
 
@@ -167,21 +183,41 @@ class RunManager:
                 run.publish(RunEvent("error", {"message": "Run ended unexpectedly"}))
 
     # ── streaming ──────────────────────────────────────────────────────
-    async def subscribe(self, run_id: str, after_seq: int = -1) -> AsyncIterator[SeqEvent]:
+    async def subscribe(
+        self, run_id: str, after_seq: int = -1, heartbeat: float | None = None
+    ) -> AsyncIterator[SeqEvent | None]:
+        """Yields the run's events after ``after_seq``; ``None`` is a heartbeat.
+
+        The queue is registered before the replay buffer is copied, so nothing
+        published in between is lost; duplicates are filtered by seq.
+        """
         run = self.get(run_id)
         queue: asyncio.Queue[SeqEvent | None] = asyncio.Queue()
         run.subscribers.append(queue)
+        last = after_seq
         try:
             for item in list(run.buffer):
-                if item.seq > after_seq:
+                if item.seq > last:
+                    last = item.seq
                     yield item
             if run.done:
+                # Finished before or during the replay: drain what arrived meanwhile.
+                while not queue.empty():
+                    item = queue.get_nowait()
+                    if item is not None and item.seq > last:
+                        last = item.seq
+                        yield item
                 return
             while True:
-                item = await queue.get()
+                try:
+                    item = await asyncio.wait_for(queue.get(), timeout=heartbeat)
+                except asyncio.TimeoutError:
+                    yield None
+                    continue
                 if item is None:
                     return
-                if item.seq > after_seq:
+                if item.seq > last:
+                    last = item.seq
                     yield item
         finally:
             with contextlib.suppress(ValueError):

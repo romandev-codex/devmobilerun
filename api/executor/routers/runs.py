@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import asyncio
 import json
 from typing import Any
 
@@ -10,7 +9,7 @@ from pydantic import BaseModel, Field
 
 from ..deps import require_token
 from ..framework import DeviceNotFound, RunSpec
-from ..runs import DeviceBusy, RunManager, RunNotFound
+from ..runs import DeviceBusy, RunExists, RunManager, RunNotFound
 
 router = APIRouter(dependencies=[Depends(require_token)])
 
@@ -64,6 +63,10 @@ async def start_run(body: StartRunRequest, runs: RunManager = Depends(get_run_ma
         raise HTTPException(
             status_code=409, detail={"code": "device_busy", "message": str(exc)}
         ) from None
+    except RunExists as exc:
+        raise HTTPException(
+            status_code=409, detail={"code": "run_exists", "message": str(exc)}
+        ) from None
     except DeviceNotFound:
         raise HTTPException(
             status_code=404,
@@ -106,21 +109,12 @@ async def run_events(
     after_seq = int(last_id) if last_id and last_id.isdigit() else -1
 
     async def stream():
-        events = runs.subscribe(run_id, after_seq=after_seq)
-        agen = events.__aiter__()
-        try:
-            while True:
-                try:
-                    item = await asyncio.wait_for(agen.__anext__(), timeout=HEARTBEAT_SECONDS)
-                except asyncio.TimeoutError:
-                    yield ": keep-alive\n\n"
-                    continue
-                except StopAsyncIteration:
-                    return
-                data = json.dumps(item.event.payload, separators=(",", ":"))
-                yield f"id: {item.seq}\nevent: {item.event.type}\ndata: {data}\n\n"
-        finally:
-            await agen.aclose()
+        async for item in runs.subscribe(run_id, after_seq=after_seq, heartbeat=HEARTBEAT_SECONDS):
+            if item is None:
+                yield ": keep-alive\n\n"
+                continue
+            data = json.dumps(item.event.payload, separators=(",", ":"))
+            yield f"id: {item.seq}\nevent: {item.event.type}\ndata: {data}\n\n"
 
     return StreamingResponse(
         stream(),

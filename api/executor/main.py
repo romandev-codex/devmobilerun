@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import logging
+
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
@@ -9,6 +11,8 @@ from .framework import Framework, MobilerunFramework
 from .routers import config, devices, health, runs
 from .runs import RunManager
 from .settings import Settings
+
+logger = logging.getLogger(__name__)
 
 
 def create_app(settings: Settings, framework: Framework | None = None) -> FastAPI:
@@ -32,6 +36,14 @@ def create_app(settings: Settings, framework: Framework | None = None) -> FastAP
         return JSONResponse(
             status_code=422,
             content={"error": {"code": "validation_error", "message": str(exc.errors())}},
+        )
+
+    @app.exception_handler(Exception)
+    async def unexpected_error(_: Request, exc: Exception) -> JSONResponse:
+        logger.exception("unhandled error")
+        return JSONResponse(
+            status_code=500,
+            content={"error": {"code": "internal_error", "message": f"{type(exc).__name__}: {exc}"}},
         )
 
     app.include_router(health.router)
