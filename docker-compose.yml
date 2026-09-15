@@ -1,3 +1,7 @@
+# Default: `docker compose up -d` starts MongoDB only, and you run the executor
+# and the app on the host (the executor needs adb access to USB phones, which a
+# container on macOS cannot get). Add `--profile full` to also run the app and
+# the executor in containers, which suits Linux hosts or wifi-adb phones.
 services:
   mongo:
     image: mongo:8
@@ -5,6 +9,33 @@ services:
       - "27017:27017"
     volumes:
       - mongo-data:/data/db
+
+  executor:
+    profiles: ["full"]
+    build: ./api
+    environment:
+      EXECUTOR_TOKEN: ${EXECUTOR_TOKEN:-change-me}
+      EXECUTOR_HOST: 0.0.0.0
+      EXECUTOR_PORT: "8765"
+      # Mount your framework config and API keys; see README.
+      MOBILERUN_CONFIG: /config/config.yaml
+    volumes:
+      - ${MOBILERUN_CONFIG_DIR:-~/Library/Application Support/droidrun}:/config:ro
+    ports:
+      - "8765:8765"
+
+  app:
+    profiles: ["full"]
+    build: .
+    environment:
+      MONGODB_URI: mongodb://mongo:27017/mobilerun
+      EXECUTOR_URL: http://executor:8765
+      EXECUTOR_TOKEN: ${EXECUTOR_TOKEN:-change-me}
+    ports:
+      - "3000:3000"
+    depends_on:
+      - mongo
+      - executor
 
 volumes:
   mongo-data:

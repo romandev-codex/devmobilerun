@@ -11,7 +11,11 @@
     "format": "prettier --write \"**/*.{ts,tsx}\"",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "executor": "cd api && uv run mobilerun-executor",
+    "test:executor": "cd api && uv run pytest -q",
+    "test:all": "npm test && npm run test:executor",
+    "check": "npm run typecheck && npm run lint && npm run test:all"
   },
   "dependencies": {
     "@base-ui/react": "^1.8.0",
