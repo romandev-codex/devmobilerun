@@ -26,7 +26,13 @@ export EXECUTOR_TOKEN
 
 HAS_DOCKER := $(shell command -v docker >/dev/null 2>&1 && docker info >/dev/null 2>&1 && echo yes)
 
-.PHONY: help setup env mongo mongo-stop executor app dev stop test test-app test-executor check clean
+# Local mobilerun checkout (relative to api/). When present it is installed
+# editable over the PyPI release, and `uv run` skips syncing so it is not reverted.
+MOBILERUN_SRC ?= ../../../mobilerun
+HAS_MOBILERUN_SRC := $(shell test -f api/$(MOBILERUN_SRC)/pyproject.toml && echo yes)
+UV_RUN := uv run$(if $(HAS_MOBILERUN_SRC), --no-sync)
+
+.PHONY: help setup env mobilerun-local mongo mongo-stop executor app dev stop test test-app test-executor check clean
 
 help:
 	@sed -n 's/^#   \(.*\)/\1/p' $(MAKEFILE_LIST) | head -6
@@ -37,6 +43,11 @@ env:
 setup: env
 	npm install
 	cd api && uv sync --extra dev
+	@if [ "$(HAS_MOBILERUN_SRC)" = yes ]; then $(MAKE) mobilerun-local; fi
+
+# Install the local mobilerun checkout in editable mode.
+mobilerun-local:
+	cd api && uv pip install --python .venv -e $(MOBILERUN_SRC)
 
 mongo:
 ifeq ($(HAS_DOCKER),yes)
@@ -55,7 +66,7 @@ else
 endif
 
 executor:
-	cd api && uv run mobilerun-executor
+	cd api && $(UV_RUN) mobilerun-executor
 
 app:
 	npm run dev
@@ -63,7 +74,7 @@ app:
 # Runs the executor and the app in the foreground; Ctrl+C stops both.
 dev: env
 	@trap 'kill 0' INT TERM EXIT; \
-	  (cd api && uv run mobilerun-executor) & \
+	  (cd api && $(UV_RUN) mobilerun-executor) & \
 	  npm run dev & \
 	  wait
 
@@ -73,7 +84,7 @@ test-app:
 	npm test
 
 test-executor:
-	cd api && uv run pytest -q
+	cd api && $(UV_RUN) pytest -q
 
 test: test-app test-executor
 
