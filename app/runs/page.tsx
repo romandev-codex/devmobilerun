@@ -1,10 +1,78 @@
-import { PageHeader } from "@/components/app/page-header"
+import Link from "next/link"
 
-export default function UrunsPage() {
+import { PageHeader } from "@/components/app/page-header"
+import { RunFilters } from "@/components/runs/run-filters"
+import { RunTable } from "@/components/runs/run-table"
+import { Button } from "@/components/ui/button"
+import { deviceLabel, listDevices } from "@/lib/devices"
+import { listRuns } from "@/lib/runs/service"
+import { listTasks } from "@/lib/tasks"
+
+export const dynamic = "force-dynamic"
+
+type Search = Record<string, string | string[] | undefined>
+
+function pick(sp: Search, key: string): string | undefined {
+  const v = sp[key]
+  const s = Array.isArray(v) ? v[0] : v
+  return s ? s : undefined
+}
+
+export default async function RunsPage({
+  searchParams,
+}: {
+  searchParams: Promise<Search>
+}) {
+  const sp = await searchParams
+  const current = {
+    taskId: pick(sp, "taskId"),
+    deviceSerial: pick(sp, "deviceSerial"),
+    status: pick(sp, "status"),
+    trigger: pick(sp, "trigger"),
+  }
+  const before = pick(sp, "before")
+  const [page, tasks, devices] = await Promise.all([
+    listRuns({ ...current, before, limit: 50 }),
+    listTasks(),
+    listDevices(),
+  ])
+  const deviceNames = Object.fromEntries(
+    devices.map((d) => [d.serial, deviceLabel(d)])
+  )
+  const older = new URLSearchParams()
+  for (const [k, v] of Object.entries(current)) if (v) older.set(k, v)
+  if (page.nextBefore) older.set("before", page.nextBefore)
+
   return (
     <div>
-      <PageHeader title="Uruns" />
-      <p className="text-sm text-muted-foreground">Coming soon.</p>
+      <PageHeader
+        title="Runs"
+        description="Every run across tasks and devices, newest first."
+      />
+      <RunFilters
+        tasks={tasks.map((t) => ({ id: t.id, name: t.name }))}
+        devices={devices.map((d) => ({
+          serial: d.serial,
+          label: deviceLabel(d),
+        }))}
+        current={current}
+      />
+      <RunTable
+        runs={page.runs}
+        deviceNames={deviceNames}
+        emptyText="No runs match these filters."
+      />
+      {page.nextBefore ? (
+        <div className="mt-4">
+          <Button
+            variant="outline"
+            size="sm"
+            render={<Link href={`/runs?${older.toString()}`} />}
+          >
+            Older runs
+          </Button>
+        </div>
+      ) : null}
     </div>
   )
 }

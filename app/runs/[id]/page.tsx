@@ -2,10 +2,11 @@ import { notFound } from "next/navigation"
 
 import { PageHeader } from "@/components/app/page-header"
 import { RunMeta } from "@/components/runs/run-summary"
+import { DeleteRunButton } from "@/components/runs/delete-run-button"
 import { RunTimeline } from "@/components/runs/run-timeline"
 import { ApiError } from "@/lib/api/errors"
 import { deviceLabel, getDevice } from "@/lib/devices"
-import { getRun, listRunEvents } from "@/lib/runs/service"
+import { getRun, isTerminal, listRunEvents } from "@/lib/runs/service"
 
 export const dynamic = "force-dynamic"
 
@@ -44,6 +45,9 @@ export default async function RunPage({
               {run.instruction}
             </pre>
           </details>
+          {isTerminal(run.status) ? (
+            <DeleteRunButton runId={run.id} taskId={run.taskId} />
+          ) : null}
         </aside>
       </div>
     </div>

@@ -6,7 +6,9 @@ import { DeviceNameEditor } from "@/components/devices/device-name-editor"
 import { DeviceScreen } from "@/components/devices/device-screen"
 import { ApiError } from "@/lib/api/errors"
 import { deviceLabel, getDevice } from "@/lib/devices"
+import { listRuns } from "@/lib/runs/service"
 import { getSettings } from "@/lib/settings"
+import { RunTable } from "@/components/runs/run-table"
 
 export const dynamic = "force-dynamic"
 
@@ -23,6 +25,7 @@ export default async function DevicePage({
     }),
     getSettings(),
   ])
+  const history = await listRuns({ deviceSerial: device.serial, limit: 20 })
   return (
     <div>
       <PageHeader
@@ -63,6 +66,14 @@ export default async function DevicePage({
           </dl>
         </div>
       </div>
+      <section className="mt-8">
+        <h2 className="mb-3 text-sm font-medium">Recent runs on this device</h2>
+        <RunTable
+          runs={history.runs}
+          showDevice={false}
+          emptyText="Nothing has run on this device yet."
+        />
+      </section>
     </div>
   )
 }

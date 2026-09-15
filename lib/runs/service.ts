@@ -6,6 +6,7 @@ import { connectDb } from "@/lib/db"
 import { Device } from "@/lib/models/device"
 import {
   Run,
+  RUN_STATUSES,
   TERMINAL_RUN_STATUSES,
   type RunDoc,
   type RunStatus,
@@ -245,4 +246,54 @@ export async function stopRun(id: string): Promise<RunView> {
     }
   }
   return getRun(id)
+}
+
+export const listRunsSchema = z.object({
+  taskId: z.string().optional(),
+  deviceSerial: z.string().optional(),
+  status: z.enum(RUN_STATUSES).optional(),
+  trigger: z.enum(["manual", "schedule"]).optional(),
+  scheduleId: z.string().optional(),
+  limit: z.coerce.number().int().min(1).max(200).default(50),
+  before: z.string().optional(),
+})
+
+export type ListRunsQuery = z.input<typeof listRunsSchema>
+
+export type RunPage = { runs: RunView[]; nextBefore: string | null }
+
+/** Newest first, paginated by the id of the last run seen (`before`). */
+export async function listRuns(query: unknown): Promise<RunPage> {
+  const q = listRunsSchema.parse(query)
+  await connectDb()
+  const filter: Record<string, unknown> = {}
+  if (q.taskId) filter.taskId = asObjectId(q.taskId, "Task")
+  if (q.scheduleId) filter.scheduleId = asObjectId(q.scheduleId, "Schedule")
+  if (q.deviceSerial) filter.deviceSerial = q.deviceSerial
+  if (q.status) filter.status = q.status
+  if (q.trigger) filter.trigger = q.trigger
+  if (q.before) filter._id = { $lt: asObjectId(q.before) }
+  const docs = await Run.find(filter)
+    .sort({ _id: -1 })
+    .limit(q.limit + 1)
+    .lean<RunDoc[]>()
+  const page = docs.slice(0, q.limit)
+  return {
+    runs: page.map(toRunView),
+    nextBefore:
+      docs.length > q.limit ? page[page.length - 1]._id.toString() : null,
+  }
+}
+
+/** Deletes a finished run with its events and screenshots. */
+export async function deleteRun(id: string): Promise<void> {
+  await connectDb()
+  const run = await Run.findById(asObjectId(id)).lean<RunDoc>()
+  if (!run) throw notFound("Run")
+  if (!isTerminal(run.status))
+    throw conflict(`Run is ${run.status}; stop it before deleting`)
+  const { deleteRunScreenshots } = await import("@/lib/runs/screenshots")
+  await deleteRunScreenshots(run._id)
+  await RunEvent.deleteMany({ runId: run._id })
+  await Run.deleteOne({ _id: run._id })
 }
