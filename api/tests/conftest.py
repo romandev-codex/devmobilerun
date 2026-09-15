@@ -3,7 +3,7 @@ from __future__ import annotations
 import pytest
 from httpx import ASGITransport, AsyncClient
 
-from executor.framework import ConfigSummary, DeviceInfo, LlmProfile
+from executor.framework import ConfigSummary, DeviceInfo, DeviceNotFound, LlmProfile
 from executor.main import create_app
 from executor.settings import Settings
 
@@ -31,6 +31,14 @@ class FakeFramework:
 
     async def list_devices(self) -> list[DeviceInfo]:
         return list(self.devices)
+
+    async def screenshot(self, serial: str) -> bytes:
+        if not any(d.serial == serial and d.state == "device" for d in self.devices):
+            raise DeviceNotFound(serial)
+        return PNG_BYTES
+
+
+PNG_BYTES = b"\x89PNG\r\n\x1a\n" + b"fake-image-" + b"0" * 32
 
 
 @pytest.fixture

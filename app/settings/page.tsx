@@ -1,7 +1,9 @@
 import { PageHeader } from "@/components/app/page-header"
 import { ExecutorStatus } from "@/components/app/executor-status"
+import { SettingsForm } from "@/components/settings/settings-form"
 import { executor, ExecutorError } from "@/lib/executor/client"
 import type { ExecutorConfig, ExecutorHealth } from "@/lib/executor/types"
+import { getSettings } from "@/lib/settings"
 
 export const dynamic = "force-dynamic"
 
@@ -26,7 +28,10 @@ async function loadExecutor(): Promise<ExecutorSnapshot> {
 }
 
 export default async function SettingsPage() {
-  const snapshot = await loadExecutor()
+  const [snapshot, settings] = await Promise.all([
+    loadExecutor(),
+    getSettings(),
+  ])
   return (
     <div>
       <PageHeader
@@ -34,6 +39,7 @@ export default async function SettingsPage() {
         description="Execution service and model configuration."
       />
       <div className="grid max-w-3xl gap-6">
+        <SettingsForm settings={settings} />
         <ExecutorStatus snapshot={snapshot} />
       </div>
     </div>

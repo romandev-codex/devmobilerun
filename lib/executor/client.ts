@@ -70,4 +70,10 @@ export const executor = {
   health: () => executorJson<ExecutorHealth>("/health"),
   config: () => executorJson<ExecutorConfig>("/config"),
   devices: () => executorJson<ExecutorDevice[]>("/devices"),
+  screenshot: async (serial: string): Promise<Uint8Array> => {
+    const res = await executorFetch(
+      `/devices/${encodeURIComponent(serial)}/screenshot`
+    )
+    return new Uint8Array(await res.arrayBuffer())
+  },
 }

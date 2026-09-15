@@ -33,6 +33,10 @@ export function route<Ctx>(
       if (err instanceof ExecutorError) {
         if (err.code === "unreachable")
           return jsonError("executor_unreachable", err.message, 502)
+        if (err.code === "not_found")
+          return jsonError("not_found", err.message, 404)
+        if (err.code === "conflict")
+          return jsonError("conflict", err.message, 409)
         return jsonError("executor_error", err.message, err.status ?? 502)
       }
       if (err instanceof SyntaxError)

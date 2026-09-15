@@ -30,12 +30,18 @@ class DeviceInfo:
     model: str | None = None
 
 
+class DeviceNotFound(Exception):
+    """Raised when a serial is not in the adb device list."""
+
+
 class Framework(Protocol):
     def version(self) -> str: ...
 
     def describe_config(self) -> ConfigSummary: ...
 
     async def list_devices(self) -> list[DeviceInfo]: ...
+
+    async def screenshot(self, serial: str) -> bytes: ...
 
 
 class MobilerunFramework:
@@ -78,3 +84,12 @@ class MobilerunFramework:
                     model = None
             devices.append(DeviceInfo(serial=info.serial, state=info.state, model=model))
         return devices
+
+    async def screenshot(self, serial: str) -> bytes:
+        from async_adbutils import adb
+
+        infos = await adb.list()
+        if not any(i.serial == serial and i.state == "device" for i in infos):
+            raise DeviceNotFound(serial)
+        device = await adb.device(serial=serial)
+        return await device.screenshot_bytes()

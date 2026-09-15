@@ -1,6 +1,7 @@
 import Link from "next/link"
 
 import { DeviceNameEditor } from "@/components/devices/device-name-editor"
+import { DeviceScreen } from "@/components/devices/device-screen"
 import { Badge } from "@/components/ui/badge"
 import { Card, CardContent, CardHeader } from "@/components/ui/card"
 import type { DeviceView } from "@/lib/devices"
@@ -16,7 +17,13 @@ export function DeviceStateBadge({
   return <Badge variant="outline">offline</Badge>
 }
 
-export function DeviceCard({ device }: { device: DeviceView }) {
+export function DeviceCard({
+  device,
+  intervalMs,
+}: {
+  device: DeviceView
+  intervalMs: number
+}) {
   const fallback = device.model || device.serial
   return (
     <Card className="gap-3">
@@ -33,20 +40,32 @@ export function DeviceCard({ device }: { device: DeviceView }) {
         </div>
         <DeviceStateBadge device={device} />
       </CardHeader>
-      <CardContent className="flex items-center justify-between text-xs">
-        <span className="text-muted-foreground">
-          {device.activeRunId
-            ? "Running a task"
-            : device.online
-              ? "Idle"
-              : "Not connected"}
-        </span>
+      <CardContent className="flex flex-col gap-3">
         <Link
           href={`/devices/${encodeURIComponent(device.serial)}`}
-          className="underline"
+          className="block"
         >
-          Open
+          <DeviceScreen
+            serial={device.serial}
+            online={device.online}
+            intervalMs={intervalMs}
+          />
         </Link>
+        <div className="flex items-center justify-between text-xs">
+          <span className="text-muted-foreground">
+            {device.activeRunId
+              ? "Running a task"
+              : device.online
+                ? "Idle"
+                : "Not connected"}
+          </span>
+          <Link
+            href={`/devices/${encodeURIComponent(device.serial)}`}
+            className="underline"
+          >
+            Open
+          </Link>
+        </div>
       </CardContent>
     </Card>
   )

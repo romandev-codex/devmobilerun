@@ -2,6 +2,7 @@ import { PageHeader } from "@/components/app/page-header"
 import { DeviceCard } from "@/components/devices/device-card"
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { listDevices, syncDevices, type DeviceView } from "@/lib/devices"
+import { getSettings } from "@/lib/settings"
 
 export const dynamic = "force-dynamic"
 
@@ -18,7 +19,10 @@ async function loadDevices(): Promise<{
 }
 
 export default async function DevicesPage() {
-  const { devices, error } = await loadDevices()
+  const [{ devices, error }, settings] = await Promise.all([
+    loadDevices(),
+    getSettings(),
+  ])
   return (
     <div>
       <PageHeader
@@ -38,7 +42,11 @@ export default async function DevicesPage() {
       ) : (
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
           {devices.map((d) => (
-            <DeviceCard key={d.serial} device={d} />
+            <DeviceCard
+              key={d.serial}
+              device={d}
+              intervalMs={settings.screenshotIntervalMs}
+            />
           ))}
         </div>
       )}
