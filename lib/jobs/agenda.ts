@@ -2,6 +2,7 @@ import { Agenda, type Job } from "@hokify/agenda"
 import mongoose from "mongoose"
 
 import { connectDb } from "@/lib/db"
+import { reconcileOnBoot } from "@/lib/jobs/reconcile"
 import {
   executeRun,
   MAX_RUN_LIFETIME_MS,
@@ -46,7 +47,13 @@ export async function getAgenda(): Promise<Agenda> {
 export function startAgenda(): Promise<void> {
   if (!globalForAgenda.__agendaStarted) {
     globalForAgenda.__agendaStarted = getAgenda()
-      .then((agenda) => agenda.start())
+      .then(async (agenda) => {
+        const report = await reconcileOnBoot()
+        if (report.lostRuns || report.freedDevices || report.unlockedJobs) {
+          console.warn("[agenda] reconciled after restart", report)
+        }
+        await agenda.start()
+      })
       .catch((err) => {
         globalForAgenda.__agendaStarted = undefined
         throw err
