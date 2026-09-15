@@ -354,29 +354,7 @@ export async function executeScheduleTick(scheduleId: string): Promise<void> {
     }
     const { executeRun } = await import("@/lib/jobs/run-task")
     await executeRun(run.id)
-
-    const finishedAt = new Date()
-    const updated = await Schedule.findByIdAndUpdate(
-      oid,
-      {
-        $inc: { runCount: 1 },
-        $set: {
-          lastRunId: new mongoose.Types.ObjectId(run.id),
-          lastRunAt: finishedAt,
-        },
-      },
-      { new: true }
-    ).lean<ScheduleDoc>()
-    if (!updated || !updated.enabled) {
-      next = null
-      return
-    }
-    if (isExhausted(updated)) {
-      await disableSchedule(oid)
-      next = null
-      return
-    }
-    next = new Date(finishedAt.getTime() + updated.intervalSeconds * 1000)
+    next = await recordScheduledRun(oid, new mongoose.Types.ObjectId(run.id))
   } catch (err) {
     console.error(`[schedule-tick] ${scheduleId} failed`, err)
   } finally {
@@ -391,16 +369,70 @@ export async function executeScheduleTick(scheduleId: string): Promise<void> {
   }
 }
 
+/**
+ * Counts a finished scheduled run against its schedule and returns when the
+ * next tick should fire, or null when the schedule is disabled or exhausted.
+ */
+async function recordScheduledRun(
+  scheduleId: mongoose.Types.ObjectId,
+  runId: mongoose.Types.ObjectId
+): Promise<Date | null> {
+  const finishedAt = new Date()
+  const updated = await Schedule.findByIdAndUpdate(
+    scheduleId,
+    {
+      $inc: { runCount: 1 },
+      $set: { lastRunId: runId, lastRunAt: finishedAt },
+    },
+    { new: true }
+  ).lean<ScheduleDoc>()
+  if (!updated || !updated.enabled) return null
+  if (isExhausted(updated)) {
+    await disableSchedule(scheduleId)
+    return null
+  }
+  return new Date(finishedAt.getTime() + updated.intervalSeconds * 1000)
+}
+
+/**
+ * Bookkeeping for a scheduled run that finished outside its tick (resumed after
+ * a restart). Counts it and plans the next tick as the tick itself would have.
+ */
+export async function afterScheduledRunFinished(
+  runId: mongoose.Types.ObjectId
+): Promise<void> {
+  await connectDb()
+  const run = await Run.findById(runId).select("scheduleId trigger").lean<{
+    scheduleId?: mongoose.Types.ObjectId | null
+    trigger: string
+  }>()
+  if (!run || run.trigger !== "schedule" || !run.scheduleId) return
+  const schedule = await Schedule.findById(run.scheduleId).lean<ScheduleDoc>()
+  if (!schedule || !schedule.enabled) return
+  if (schedule.lastRunId && schedule.lastRunId.equals(runId)) return // already counted
+  const next = await recordScheduledRun(schedule._id, runId)
+  if (next) await planNextTick(schedule._id, next)
+}
+
 /** Ensures every enabled schedule has a pending tick; called at server start. */
 export async function reconcileSchedules(): Promise<number> {
   await connectDb()
   const enabled = await Schedule.find({ enabled: true }).lean<ScheduleDoc[]>()
   let planned = 0
+  const resuming = new Set(
+    (
+      await Run.find({ status: "running", scheduleId: { $ne: null } })
+        .select("scheduleId")
+        .lean<{ scheduleId: mongoose.Types.ObjectId }[]>()
+    ).map((r) => r.scheduleId.toString())
+  )
   for (const s of enabled) {
     if (isExhausted(s)) {
       await disableSchedule(s._id)
       continue
     }
+    // A run of this schedule is being resumed; it plans the next tick when it finishes.
+    if (resuming.has(s._id.toString())) continue
     if ((await pendingTickCount(s._id)) === 0) {
       const when = nextTickFor(s)
       await planNextTick(s._id, when)

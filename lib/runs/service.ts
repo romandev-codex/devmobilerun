@@ -246,14 +246,21 @@ export async function transitionRun(
   return res.matchedCount === 1
 }
 
-export async function lastRunEventSeq(
-  runId: mongoose.Types.ObjectId
-): Promise<number> {
+export async function lastRunEvent(runId: mongoose.Types.ObjectId): Promise<{
+  seq: number
+  type: string
+  payload: Record<string, unknown>
+} | null> {
   const last = await RunEvent.findOne({ runId })
     .sort({ seq: -1 })
-    .select("seq")
-    .lean<{ seq: number }>()
-  return last ? last.seq : -1
+    .lean<RunEventDoc>()
+  return last
+    ? {
+        seq: last.seq,
+        type: last.type,
+        payload: (last.payload as Record<string, unknown>) ?? {},
+      }
+    : null
 }
 
 export async function appendRunEvent(
@@ -313,17 +320,10 @@ export async function stopRun(id: string): Promise<RunView> {
   try {
     await executor.stopRun(run._id.toString())
   } catch (err) {
-    if (
-      err instanceof ExecutorError &&
-      (err.code === "not_found" || err.code === "unreachable")
-    ) {
-      await finishRun(run._id, {
-        status: "cancelled",
-        error:
-          err.code === "unreachable"
-            ? "Executor unreachable; cancelled locally"
-            : null,
-      })
+    // Only a run the executor has forgotten can be cancelled locally; an
+    // unreachable executor may still be driving the phone, so that is an error.
+    if (err instanceof ExecutorError && err.code === "not_found") {
+      await finishRun(run._id, { status: "cancelled", error: null })
       await releaseDeviceLock(run.deviceSerial, run._id)
     } else {
       throw err

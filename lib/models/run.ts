@@ -19,12 +19,7 @@ const runOptionsSchema = new Schema(
 
 const runSchema = new Schema(
   {
-    taskId: {
-      type: Schema.Types.ObjectId,
-      ref: "Task",
-      required: true,
-      index: true,
-    },
+    taskId: { type: Schema.Types.ObjectId, ref: "Task", required: true },
     taskName: { type: String, required: true },
     scheduleId: {
       type: Schema.Types.ObjectId,
@@ -32,7 +27,7 @@ const runSchema = new Schema(
       default: null,
       index: true,
     },
-    deviceSerial: { type: String, required: true, index: true },
+    deviceSerial: { type: String, required: true },
     status: {
       type: String,
       enum: RUN_STATUSES,

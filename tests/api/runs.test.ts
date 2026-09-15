@@ -367,6 +367,35 @@ describe("executeRun", () => {
     expect((await device())!.activeRunId).toBeNull()
   })
 
+  it("finishes a resumed run from its stored terminal event without contacting the executor", async () => {
+    await syncDevices()
+    const task = await createTask()
+    const { body } = await runNow(task.id)
+    const { Run } = await import("@/lib/models/run")
+    const { RunEvent } = await import("@/lib/models/run-event")
+    const oid = new mongoose.Types.ObjectId(body.run.id)
+    await Run.updateOne(
+      { _id: oid },
+      { $set: { status: "running", startedAt: new Date() } }
+    )
+    await RunEvent.create([
+      { runId: oid, seq: 0, type: "started", at: new Date(), payload: {} },
+      {
+        runId: oid,
+        seq: 1,
+        type: "result",
+        at: new Date(),
+        payload: { success: true, reason: "stored", steps: 2 },
+      },
+    ])
+    eventsStatus = 404 // the executor has forgotten the run; the stored result must win
+    const { executeRun } = await import("@/lib/jobs/run-task")
+    await executeRun(body.run.id)
+    const { run } = await getRun(body.run.id)
+    expect(run.status).toBe("succeeded")
+    expect(run.result).toEqual({ success: true, reason: "stored", steps: 2 })
+  })
+
   it("marks a running run lost when the executor no longer knows it", async () => {
     await syncDevices()
     const task = await createTask()

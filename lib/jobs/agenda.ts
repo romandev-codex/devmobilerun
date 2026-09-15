@@ -26,13 +26,8 @@ export async function getAgenda(): Promise<Agenda> {
   await connectDb()
   if (globalForAgenda.__agenda) return globalForAgenda.__agenda
   const agenda = new Agenda({
-    mongo: mongoose.connection.db as unknown as ConstructorParameters<
-      typeof Agenda
-    >[0] extends infer C
-      ? C extends { mongo: infer Db }
-        ? Db
-        : never
-      : never,
+    // Agenda types its Db against its own (older) mongodb typings; the runtime object is the same driver Db.
+    mongo: mongoose.connection.db as unknown as never,
     db: { collection: "agendaJobs" },
     processEvery: "2 seconds",
     ensureIndex: true,
@@ -69,7 +64,12 @@ export function startAgenda(): Promise<void> {
         const report = await reconcileOnBoot()
         const planned = await reconcileSchedules()
         if (planned) console.warn("[agenda] re-planned schedules", planned)
-        if (report.resumedRuns || report.droppedTicks) {
+        if (
+          report.resumedRuns ||
+          report.enqueuedRuns ||
+          report.freedDevices ||
+          report.droppedTicks
+        ) {
           console.warn("[agenda] reconciled after restart", report)
         }
         await agenda.start()

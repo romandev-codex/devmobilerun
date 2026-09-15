@@ -55,20 +55,24 @@ export function DeviceScreen({
   return (
     <div className="flex flex-col gap-2">
       <div className={frame}>
-        {online && !failed ? (
+        {online ? (
           // eslint-disable-next-line @next/next/no-img-element
           <img
             src={src}
             alt={`Screen of ${serial}`}
-            className="h-full w-full object-contain"
+            className={cn(
+              "h-full w-full object-contain",
+              failed && "opacity-30"
+            )}
             onError={() => setFailed(true)}
             onLoad={() => setFailed(false)}
           />
-        ) : (
-          <span className="px-4 text-center text-xs text-muted-foreground">
-            {online ? "Screenshot unavailable" : "Device offline"}
+        ) : null}
+        {!online || failed ? (
+          <span className="absolute px-4 text-center text-xs text-muted-foreground">
+            {online ? "Screenshot unavailable, retrying" : "Device offline"}
           </span>
-        )}
+        ) : null}
       </div>
       {pausable ? (
         <div className="flex items-center justify-between text-xs">

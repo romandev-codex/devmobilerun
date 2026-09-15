@@ -74,8 +74,12 @@ describe("reconcileOnBoot", () => {
       { $set: { status: "running", startedAt: new Date() } }
     )
     await jobs.deleteMany({ "data.runId": inline })
-    // A queued run must be left alone; a locked tick must be dropped.
+    // A queued run keeps its pending job (re-armed); a lock it holds is stale and freed.
     const queued = await start()
+    await Device.updateOne(
+      { serial: "emulator-5554" },
+      { $set: { activeRunId: new mongoose.Types.ObjectId(queued) } }
+    )
     await jobs.insertOne({
       name: "schedule-tick",
       data: { scheduleId: "x" },
@@ -86,9 +90,14 @@ describe("reconcileOnBoot", () => {
     const { reconcileOnBoot } = await import("@/lib/jobs/reconcile")
     expect(await reconcileOnBoot()).toEqual({
       resumedRuns: 2,
-      unlockedJobs: 1,
+      unlockedJobs: 2,
+      enqueuedRuns: 1,
+      freedDevices: 1,
       droppedTicks: 1,
     })
+    expect(
+      (await Device.findOne({ serial: "emulator-5554" }).lean())!.activeRunId
+    ).toBeNull()
 
     expect((await Run.findById(withJob).lean())!.status).toBe("running")
     expect((await Run.findById(queued).lean())!.status).toBe("queued")

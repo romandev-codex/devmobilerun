@@ -5,7 +5,7 @@ import { RunFilters } from "@/components/runs/run-filters"
 import { RunTable } from "@/components/runs/run-table"
 import { Button } from "@/components/ui/button"
 import { deviceLabel, listDevices } from "@/lib/devices"
-import { listRuns } from "@/lib/runs/service"
+import { listRuns, listRunsSchema } from "@/lib/runs/service"
 import { listTasks } from "@/lib/tasks"
 
 export const dynamic = "force-dynamic"
@@ -31,8 +31,11 @@ export default async function RunsPage({
     trigger: pick(sp, "trigger"),
   }
   const before = pick(sp, "before")
+  // A stale bookmark or a typo in the query string should show an empty table, not an error page.
+  const parsed = listRunsSchema.safeParse({ ...current, before, limit: 50 })
+  const query = parsed.success ? parsed.data : { limit: 50 }
   const [page, tasks, devices] = await Promise.all([
-    listRuns({ ...current, before, limit: 50 }),
+    listRuns(query).catch(() => ({ runs: [], nextBefore: null })),
     listTasks(),
     listDevices(),
   ])

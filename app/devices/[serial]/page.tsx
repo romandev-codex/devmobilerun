@@ -19,7 +19,7 @@ export default async function DevicePage({
 }) {
   const { serial } = await params
   const [device, settings] = await Promise.all([
-    getDevice(decodeURIComponent(serial)).catch((err) => {
+    getDevice(serial).catch((err) => {
       if (err instanceof ApiError && err.status === 404) notFound()
       throw err
     }),

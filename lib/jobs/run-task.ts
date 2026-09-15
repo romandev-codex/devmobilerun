@@ -12,7 +12,7 @@ import {
   acquireDeviceLock,
   appendRunEvent,
   finishRun,
-  lastRunEventSeq,
+  lastRunEvent,
   releaseDeviceLock,
   transitionRun,
 } from "@/lib/runs/service"
@@ -99,10 +99,15 @@ async function resumeRun(
   deviceSerial: string,
   taskId: mongoose.Types.ObjectId
 ): Promise<void> {
-  const lastSeq = await lastRunEventSeq(runId)
   try {
+    // The terminal event may already be stored if the crash hit between writes.
+    const last = await lastRunEvent(runId)
+    if (last && finishFromEvent(runId, last.type, last.payload)) {
+      await finishFromEvent(runId, last.type, last.payload)
+      return
+    }
     await acquireDeviceLock(deviceSerial, runId)
-    await tailUntilFinished(runId, lastSeq)
+    await tailUntilFinished(runId, last ? last.seq : -1)
   } catch (err) {
     if (err instanceof ExecutorError && err.code === "not_found") {
       await finishRun(runId, {
@@ -117,9 +122,43 @@ async function resumeRun(
     await releaseDeviceLock(deviceSerial, runId)
     const { screenshotRetentionRuns } = await getSettings()
     await applyScreenshotRetention(taskId, screenshotRetentionRuns).catch(
-      (err) => console.error("[run-task] screenshot pruning failed", err)
+      (err: unknown) =>
+        console.error("[run-task] screenshot pruning failed", err)
+    )
+    // A run started by a schedule tick owes the schedule its bookkeeping.
+    const { afterScheduledRunFinished } = await import("@/lib/schedules")
+    await afterScheduledRunFinished(runId).catch((err: unknown) =>
+      console.error("[run-task] schedule bookkeeping failed", err)
     )
   }
+}
+
+/** Applies a terminal event to the run; returns false when the event is not terminal. */
+function finishFromEvent(
+  runId: mongoose.Types.ObjectId,
+  type: string,
+  payload: Record<string, unknown>
+): Promise<boolean> | false {
+  if (type === "result") {
+    const success = Boolean(payload.success)
+    return finishRun(runId, {
+      status: success ? "succeeded" : "failed",
+      result: {
+        success,
+        reason: String(payload.reason ?? ""),
+        steps: Number(payload.steps ?? 0),
+      },
+    })
+  }
+  if (type === "error") {
+    return finishRun(runId, {
+      status: "failed",
+      error: String(payload.message ?? "Unknown error"),
+    })
+  }
+  if (type === "cancelled")
+    return finishRun(runId, { status: "cancelled", error: null })
+  return false
 }
 
 /**
@@ -134,17 +173,20 @@ async function tailUntilFinished(
 ): Promise<void> {
   let lastSeq = afterSeq
   let lastError: unknown = null
-  for (let attempt = 0; attempt < RECONNECT_ATTEMPTS; attempt++) {
+  let attempt = 0
+  while (attempt < RECONNECT_ATTEMPTS) {
     try {
       const outcome = await tailEvents(runId, lastSeq)
       if (outcome.finished) return
+      if (outcome.lastSeq > lastSeq) attempt = 0 // progress: the budget is per gap, not per run
       lastSeq = outcome.lastSeq
       lastError = new Error("Executor stream ended before the run finished")
     } catch (err) {
       if (err instanceof ExecutorError && err.code === "not_found") throw err
       lastError = err
     }
-    if (attempt < RECONNECT_ATTEMPTS - 1) await sleep(RECONNECT_DELAY_MS)
+    attempt++
+    if (attempt < RECONNECT_ATTEMPTS) await sleep(RECONNECT_DELAY_MS)
   }
   await executor.stopRun(runId.toString()).catch(() => undefined)
   const message =
@@ -178,28 +220,9 @@ async function tailEvents(
       payload: await storablePayload(runId, seq, msg.event, payload),
     })
     lastSeq = seq
-
-    if (msg.event === "result") {
-      const success = Boolean(payload.success)
-      await finishRun(runId, {
-        status: success ? "succeeded" : "failed",
-        result: {
-          success,
-          reason: String(payload.reason ?? ""),
-          steps: Number(payload.steps ?? 0),
-        },
-      })
-      return { finished: true, lastSeq }
-    }
-    if (msg.event === "error") {
-      await finishRun(runId, {
-        status: "failed",
-        error: String(payload.message ?? "Unknown error"),
-      })
-      return { finished: true, lastSeq }
-    }
-    if (msg.event === "cancelled") {
-      await finishRun(runId, { status: "cancelled", error: null })
+    const finished = finishFromEvent(runId, msg.event, payload)
+    if (finished) {
+      await finished
       return { finished: true, lastSeq }
     }
   }
@@ -216,7 +239,8 @@ async function storablePayload(
   if (type !== "screenshot") return payload
   const step = Number(payload.step ?? 0)
   const png = typeof payload.png === "string" ? payload.png : null
-  if (!png) return { step, fileId: null }
+  if (!png)
+    return { step, fileId: null, ...(payload.pruned ? { pruned: true } : {}) }
   try {
     const fileId = await storeScreenshot(
       runId,

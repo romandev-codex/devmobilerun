@@ -77,9 +77,15 @@ npm run check                   # typecheck + lint + both test suites
    app cards from Settings.
 3. The executor streams events (thoughts, actions, plans, per-step screenshots, result) which the job writes to
    MongoDB; step images go to GridFS and are pruned per the retention setting.
-4. The run page tails the stored events over SSE. Stop cancels the agent on the executor.
+4. The run page receives events pushed from the job over SSE. Stop cancels the agent on the executor; if the
+   executor is unreachable the stop fails rather than pretending the phone stopped.
 5. Schedules re-plan the next tick from the end of each run, record a skipped run when the device is busy or
-   offline, and disable themselves at their max run count. In-flight runs are marked lost after a server restart.
+   offline, and disable themselves at their max run count.
+6. After a server restart, in-flight runs reattach to the executor's stream from the last stored event; a run is
+   marked lost only when the executor no longer knows it. Scheduled runs finished this way still count toward
+   their schedule.
+7. App cards are read by the framework's planner (reasoning on). With reasoning off they are appended to the
+   instruction as app guidance so they still reach the model.
 
 ## Troubleshooting
 

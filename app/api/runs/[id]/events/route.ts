@@ -25,7 +25,11 @@ export const GET = route<Ctx>(async (req, { params }) => {
   const encoder = new TextEncoder()
   let run = await getRun(id)
 
+  let closeStream: () => void = () => undefined
   const stream = new ReadableStream<Uint8Array>({
+    cancel() {
+      closeStream()
+    },
     async start(controller) {
       let closed = false
       const send = (event: string, data: unknown, seq?: number) => {
@@ -68,7 +72,7 @@ export const GET = route<Ctx>(async (req, { params }) => {
         }
       }
       const unsubscribe = subscribeRun(id, onMessage)
-      req.signal.addEventListener("abort", () => {
+      closeStream = () => {
         closed = true
         unsubscribe()
         try {
@@ -76,7 +80,8 @@ export const GET = route<Ctx>(async (req, { params }) => {
         } catch {
           // already closed
         }
-      })
+      }
+      req.signal.addEventListener("abort", closeStream)
 
       try {
         send("status", run)
@@ -96,7 +101,7 @@ export const GET = route<Ctx>(async (req, { params }) => {
           if (isTerminal(run.status)) return await finish()
         }
       } catch (err) {
-        send("error", {
+        send("stream-error", {
           message: err instanceof Error ? err.message : String(err),
         })
         closed = true

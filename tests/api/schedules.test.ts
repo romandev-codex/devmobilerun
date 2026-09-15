@@ -352,4 +352,40 @@ describe("schedules", () => {
     expect(await pendingTicks(id)).toBe(0)
     expect(await runsFor(id)).toHaveLength(1)
   })
+
+  it("a scheduled run finished outside its tick is counted once and plans the next tick", async () => {
+    const t = await task("resume")
+    const { body } = await create({
+      taskId: t,
+      deviceSerial: "A",
+      intervalSeconds: 120,
+      enabled: false,
+    })
+    const id = body.schedule.id as string
+    await patch(id, { enabled: true })
+    await mongoose.connection
+      .db!.collection("agendaJobs")
+      .deleteMany({ "data.scheduleId": id })
+    const { createRun } = await import("@/lib/runs/service")
+    const run = await createRun({
+      taskId: t,
+      deviceSerial: "A",
+      trigger: "schedule",
+      scheduleId: id,
+    })
+    const { executeRun } = await import("@/lib/jobs/run-task")
+    const { Run } = await import("@/lib/models/run")
+    await Run.updateOne(
+      { _id: run.id },
+      { $set: { status: "running", startedAt: new Date() } }
+    )
+    await executeRun(run.id) // resume path
+    const s = await get(id)
+    expect(s.runCount).toBe(1)
+    expect(s.lastRunId).toBe(run.id)
+    expect(await pendingTicks(id)).toBe(1)
+    const { afterScheduledRunFinished } = await import("@/lib/schedules")
+    await afterScheduledRunFinished(new mongoose.Types.ObjectId(run.id))
+    expect((await get(id)).runCount).toBe(1)
+  })
 })

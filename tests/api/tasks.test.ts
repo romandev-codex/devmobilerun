@@ -159,4 +159,19 @@ describe("tasks", () => {
       maxSteps: 200,
     })
   })
+
+  it("a patch never resets fields it does not name", async () => {
+    const { body: created } = await create(valid)
+    const updated = await one("PATCH", created.task.id, {
+      options: { vision: false },
+    })
+    expect(updated.status).toBe(200)
+    expect(updated.body.task).toMatchObject({
+      start: { type: "url", value: "https://mail.example.com" },
+      end: "Go back to the home screen",
+      variables: [{ key: "account", value: "work" }],
+      options: { vision: false, reasoning: false, maxSteps: 20 },
+    })
+    expect((await one("PATCH", created.task.id, {})).status).toBe(400)
+  })
 })

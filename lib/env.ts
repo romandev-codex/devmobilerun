@@ -2,7 +2,7 @@ import { z } from "zod"
 
 const envSchema = z.object({
   MONGODB_URI: z.string().min(1, "MONGODB_URI is required"),
-  EXECUTOR_URL: z.string().url().default("http://127.0.0.1:8765"),
+  EXECUTOR_URL: z.url().default("http://127.0.0.1:8765"),
   EXECUTOR_TOKEN: z.string().min(1, "EXECUTOR_TOKEN is required"),
 })
 

@@ -1,5 +1,4 @@
 import mongoose from "mongoose"
-import { GridFSBucket, ObjectId } from "mongodb"
 
 import { connectDb } from "@/lib/db"
 import { Run, type RunStatus } from "@/lib/models/run"
@@ -7,16 +6,11 @@ import { RunEvent } from "@/lib/models/run-event"
 
 const BUCKET = "screenshots"
 
-async function bucket(): Promise<GridFSBucket> {
+async function bucket(): Promise<mongoose.mongo.GridFSBucket> {
   await connectDb()
-  return new GridFSBucket(
-    mongoose.connection.db as unknown as ConstructorParameters<
-      typeof GridFSBucket
-    >[0],
-    {
-      bucketName: BUCKET,
-    }
-  )
+  return new mongoose.mongo.GridFSBucket(mongoose.connection.db!, {
+    bucketName: BUCKET,
+  })
 }
 
 /** Stores one step screenshot and returns the GridFS file id. */
@@ -42,16 +36,16 @@ export async function storeScreenshot(
 export async function readScreenshot(
   fileId: string
 ): Promise<Uint8Array | null> {
-  if (!ObjectId.isValid(fileId)) return null
+  if (!mongoose.isValidObjectId(fileId)) return null
   const b = await bucket()
   const files = await b
-    .find({ _id: new ObjectId(fileId) })
+    .find({ _id: new mongoose.Types.ObjectId(fileId) })
     .limit(1)
     .toArray()
   if (files.length === 0) return null
   const chunks: Buffer[] = []
   await new Promise<void>((resolve, reject) => {
-    b.openDownloadStream(new ObjectId(fileId))
+    b.openDownloadStream(new mongoose.Types.ObjectId(fileId))
       .on("data", (c: Buffer) => chunks.push(c))
       .on("error", reject)
       .on("end", () => resolve())

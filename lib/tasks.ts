@@ -78,10 +78,22 @@ const taskOptionsPatchSchema = z
   })
   .partial()
 
-export const updateTaskSchema = createTaskSchema
-  .omit({ options: true })
-  .extend({ options: taskOptionsPatchSchema })
+/** Every field optional and without defaults: a patch only touches what it names. */
+export const updateTaskSchema = z
+  .object({
+    name: z.string().trim().min(1, "Name is required").max(120),
+    start: taskStartSchema.nullable(),
+    goal: z.string().trim().min(1, "Goal is required"),
+    end: z
+      .string()
+      .trim()
+      .transform((v) => (v === "" ? null : v))
+      .nullable(),
+    options: taskOptionsPatchSchema,
+    variables: taskVariablesSchema,
+  })
   .partial()
+  .refine((v) => Object.keys(v).length > 0, { message: "No fields provided" })
 
 export type TaskInput = z.infer<typeof createTaskSchema>
 

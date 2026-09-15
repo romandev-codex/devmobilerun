@@ -154,6 +154,7 @@ export function RunTimeline({
   const [run, setRun] = useState(initialRun)
   const [events, setEvents] = useState<RunEventView[]>(initialEvents)
   const [selectedSeq, setSelectedSeq] = useState<number | null>(null)
+  const [streamError, setStreamError] = useState<string | null>(null)
   const [connection, setConnection] = useState<
     "connecting" | "live" | "closed"
   >(() => (isTerminal(initialRun.status) ? "closed" : "connecting"))
@@ -197,11 +198,14 @@ export function RunTimeline({
       "plan",
       "screenshot",
       "result",
-      "error",
       "cancelled",
     ]
     const handlers = types.map((t) => [t, onEvent(t)] as const)
     for (const [t, h] of handlers) source.addEventListener(t, h)
+    source.addEventListener("stream-error", (e: MessageEvent) => {
+      const { message } = JSON.parse(e.data) as { message: string }
+      setStreamError(message)
+    })
     source.onerror = () => setConnection("closed")
     return () => source.close()
   }, [initialRun.id, initialRun.status, initialEvents])
@@ -221,6 +225,11 @@ export function RunTimeline({
   return (
     <div className="grid gap-4">
       <RunResultBanner run={run} />
+      {streamError ? (
+        <p className="text-xs text-destructive">
+          Live updates interrupted: {streamError}
+        </p>
+      ) : null}
       <div className="flex items-center justify-between">
         <h2 className="text-sm font-medium">Timeline</h2>
         <span className="flex items-center gap-2 text-xs text-muted-foreground">

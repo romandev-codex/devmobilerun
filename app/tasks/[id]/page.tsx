@@ -76,7 +76,11 @@ async function TaskHistory({
   before?: string
 }) {
   const [page, devices] = await Promise.all([
-    listRuns({ taskId, before, limit: 50 }),
+    listRuns({
+      taskId,
+      before: before && /^[a-f0-9]{24}$/.test(before) ? before : undefined,
+      limit: 50,
+    }),
     listDevices(),
   ])
   const deviceNames = Object.fromEntries(
