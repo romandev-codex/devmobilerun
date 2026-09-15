@@ -73,13 +73,11 @@ async function get(id: string) {
 }
 
 async function pendingTicks(id: string) {
-  return mongoose.connection
-    .db!.collection("agendaJobs")
-    .countDocuments({
-      name: "schedule-tick",
-      "data.scheduleId": id,
-      nextRunAt: { $ne: null },
-    })
+  return mongoose.connection.db!.collection("agendaJobs").countDocuments({
+    name: "schedule-tick",
+    "data.scheduleId": id,
+    nextRunAt: { $ne: null },
+  })
 }
 
 async function tick(id: string) {

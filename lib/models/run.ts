@@ -55,6 +55,9 @@ const runSchema = new Schema(
     startUrl: { type: String, default: null },
     options: { type: runOptionsSchema, required: true },
     variables: { type: Schema.Types.Mixed, default: {} },
+    /** Global prompt overrides and app cards the run was started with. */
+    prompts: { type: Schema.Types.Mixed, default: {} },
+    appCards: { type: Schema.Types.Mixed, default: [] },
     startedAt: { type: Date, default: null },
     finishedAt: { type: Date, default: null },
     result: {

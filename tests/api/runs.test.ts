@@ -367,3 +367,44 @@ describe("GET /api/runs/:id/events", () => {
     expect(text).toContain('"status":"succeeded"')
   })
 })
+
+describe("global prompts and app cards", () => {
+  it("are sent to the executor on every run and recorded on the run", async () => {
+    await syncDevices()
+    const settings = await import("@/app/api/settings/route")
+    await settings.PATCH(
+      new Request("http://app/x", {
+        method: "PATCH",
+        ...json({
+          prompts: { manager_system: "Be terse." },
+          appCards: [
+            {
+              packageName: "com.example.app",
+              name: "Ex",
+              content: "Tap login",
+            },
+          ],
+        }),
+      }),
+      {}
+    )
+    const task = await createTask()
+    const { body } = await runNow(task.id)
+    script = [
+      { event: "result", data: { success: true, reason: "ok", steps: 1 } },
+    ]
+    const { executeRun } = await import("@/lib/jobs/run-task")
+    await executeRun(body.run.id)
+    expect(startBodies[0]).toMatchObject({
+      prompts: { manager_system: "Be terse." },
+      appCards: [
+        { packageName: "com.example.app", name: "Ex", content: "Tap login" },
+      ],
+    })
+    const { run } = await getRun(body.run.id)
+    expect(run.prompts).toEqual({ manager_system: "Be terse." })
+    expect(run.appCards).toEqual([
+      { packageName: "com.example.app", name: "Ex", content: "Tap login" },
+    ])
+  })
+})

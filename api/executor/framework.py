@@ -213,6 +213,14 @@ class MobilerunAgentRun:
         config.device.serial = spec.device_serial
         config.logging.save_trajectory = "none"
 
+        from .app_cards import write_app_cards_dir
+
+        cards_dir = write_app_cards_dir(spec.app_cards)
+        if cards_dir is not None:
+            config.agent.app_cards.enabled = True
+            config.agent.app_cards.mode = "local"
+            config.agent.app_cards.app_cards_dir = str(cards_dir)
+
         agent = MobileAgent(
             goal=spec.instruction,
             config=config,

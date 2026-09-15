@@ -27,6 +27,8 @@ export type RunView = {
   startUrl: string | null
   options: { vision: boolean; reasoning: boolean; maxSteps: number }
   variables: Record<string, string>
+  prompts: Record<string, string>
+  appCards: { packageName: string; name: string; content: string }[]
   startedAt: string | null
   finishedAt: string | null
   result: { success: boolean; reason: string; steps: number } | null
@@ -55,6 +57,8 @@ export function toRunView(doc: RunDoc): RunView {
     startUrl: doc.startUrl ?? null,
     options: doc.options,
     variables: (doc.variables as Record<string, string>) ?? {},
+    prompts: (doc.prompts as Record<string, string>) ?? {},
+    appCards: (doc.appCards as RunView["appCards"]) ?? [],
     startedAt: doc.startedAt ? doc.startedAt.toISOString() : null,
     finishedAt: doc.finishedAt ? doc.finishedAt.toISOString() : null,
     result: doc.result

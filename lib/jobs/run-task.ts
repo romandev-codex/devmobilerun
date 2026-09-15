@@ -48,8 +48,11 @@ export async function executeRun(runId: string): Promise<void> {
     return
   }
 
+  const settings = await getSettings()
   run.status = "running"
   run.startedAt = new Date()
+  run.prompts = settings.prompts
+  run.appCards = settings.appCards
   await run.save()
 
   try {
@@ -60,6 +63,8 @@ export async function executeRun(runId: string): Promise<void> {
       startUrl: run.startUrl,
       options: run.options,
       variables: (run.variables as Record<string, string>) ?? {},
+      prompts: settings.prompts,
+      appCards: settings.appCards,
     })
     const finished = await tailEvents(run._id)
     if (!finished) {

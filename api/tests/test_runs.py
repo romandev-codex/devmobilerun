@@ -130,3 +130,16 @@ async def test_start_run_validates_body(client):
     res = await client.post("/runs", json={"runId": "x"})
     assert res.status_code == 422
     assert res.json()["error"]["code"] == "validation_error"
+
+
+async def test_prompts_and_app_cards_reach_the_agent(client, framework):
+    body = start_body(
+        run_id="cards",
+        prompts={"manager_system": "Be terse."},
+        appCards=[{"packageName": "com.example", "name": "Example", "content": "Tap login"}],
+    )
+    assert (await client.post("/runs", json=body)).status_code == 202
+    await collect_events(client, "cards")
+    spec = framework.specs[-1]
+    assert spec.prompts == {"manager_system": "Be terse."}
+    assert spec.app_cards == [{"packageName": "com.example", "name": "Example", "content": "Tap login"}]

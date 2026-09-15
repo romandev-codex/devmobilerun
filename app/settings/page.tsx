@@ -1,5 +1,7 @@
 import { PageHeader } from "@/components/app/page-header"
 import { ExecutorStatus } from "@/components/app/executor-status"
+import { AppCardsForm } from "@/components/settings/app-cards-form"
+import { PromptsForm } from "@/components/settings/prompts-form"
 import { SettingsForm } from "@/components/settings/settings-form"
 import { executor, ExecutorError } from "@/lib/executor/client"
 import type { ExecutorConfig, ExecutorHealth } from "@/lib/executor/types"
@@ -41,6 +43,8 @@ export default async function SettingsPage() {
       <div className="grid max-w-3xl gap-6">
         <SettingsForm settings={settings} />
         <ExecutorStatus snapshot={snapshot} />
+        <PromptsForm prompts={settings.prompts} />
+        <AppCardsForm appCards={settings.appCards} />
       </div>
     </div>
   )
