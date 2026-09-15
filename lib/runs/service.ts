@@ -126,6 +126,33 @@ export async function createRun(input: {
   return toRunView(doc.toObject() as RunDoc)
 }
 
+/** Records a scheduled tick that could not start. */
+export async function createSkippedRun(input: {
+  taskId: string
+  deviceSerial: string
+  scheduleId: string
+  reason: string
+}): Promise<RunView> {
+  await connectDb()
+  const task = await getTask(input.taskId)
+  const { instruction, startUrl } = composeInstruction(task)
+  const doc = await Run.create({
+    taskId: new mongoose.Types.ObjectId(task.id),
+    taskName: task.name,
+    scheduleId: new mongoose.Types.ObjectId(input.scheduleId),
+    deviceSerial: input.deviceSerial,
+    status: "skipped",
+    trigger: "schedule",
+    instruction,
+    startUrl,
+    options: task.options,
+    variables: Object.fromEntries(task.variables.map((v) => [v.key, v.value])),
+    finishedAt: new Date(),
+    skipReason: input.reason,
+  })
+  return toRunView(doc.toObject() as RunDoc)
+}
+
 export async function getRun(id: string): Promise<RunView> {
   await connectDb()
   const doc = await Run.findById(asObjectId(id)).lean<RunDoc>()

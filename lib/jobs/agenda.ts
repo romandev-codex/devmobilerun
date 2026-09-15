@@ -4,6 +4,12 @@ import mongoose from "mongoose"
 import { connectDb } from "@/lib/db"
 import { reconcileOnBoot } from "@/lib/jobs/reconcile"
 import {
+  executeScheduleTick,
+  reconcileSchedules,
+  SCHEDULE_TICK_JOB,
+  type ScheduleTickData,
+} from "@/lib/schedules"
+import {
   executeRun,
   MAX_RUN_LIFETIME_MS,
   RUN_TASK_JOB,
@@ -38,6 +44,13 @@ export async function getAgenda(): Promise<Agenda> {
     },
     { lockLifetime: MAX_RUN_LIFETIME_MS, concurrency: 20 }
   )
+  agenda.define<ScheduleTickData>(
+    SCHEDULE_TICK_JOB,
+    async (job: Job<ScheduleTickData>) => {
+      await executeScheduleTick(job.attrs.data.scheduleId)
+    },
+    { lockLifetime: MAX_RUN_LIFETIME_MS, concurrency: 20 }
+  )
   globalForAgenda.__agenda = agenda
   await agenda.ready
   return agenda
@@ -49,6 +62,8 @@ export function startAgenda(): Promise<void> {
     globalForAgenda.__agendaStarted = getAgenda()
       .then(async (agenda) => {
         const report = await reconcileOnBoot()
+        const planned = await reconcileSchedules()
+        if (planned) console.warn("[agenda] re-planned schedules", planned)
         if (report.lostRuns || report.freedDevices || report.unlockedJobs) {
           console.warn("[agenda] reconciled after restart", report)
         }

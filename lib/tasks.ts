@@ -237,10 +237,16 @@ export async function deleteTask(
   const oid = asObjectId(id)
   const res = await Task.deleteOne({ _id: oid })
   if (res.deletedCount === 0) throw notFound("Task")
-  const schedules = await mongoose.connection
-    .db!.collection("schedules")
-    .deleteMany({ taskId: oid })
-  return { deletedSchedules: schedules.deletedCount }
+  const schedules = mongoose.connection.db!.collection("schedules")
+  const ids = (
+    await schedules.find({ taskId: oid }).project({ _id: 1 }).toArray()
+  ).map((s) => s._id as mongoose.Types.ObjectId)
+  if (ids.length > 0) {
+    const { cancelSchedulesJobs } = await import("@/lib/schedules")
+    await cancelSchedulesJobs(ids)
+    await schedules.deleteMany({ _id: { $in: ids } })
+  }
+  return { deletedSchedules: ids.length }
 }
 
 function escapeRegExp(s: string): string {

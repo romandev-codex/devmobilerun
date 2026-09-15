@@ -129,11 +129,9 @@ describe("run history", () => {
     const queued = await run(t, "B", false)
     const { DELETE, GET } = await import("@/app/api/runs/[id]/route")
     const files = () =>
-      mongoose.connection
-        .db!.collection("screenshots.files")
-        .countDocuments({
-          "metadata.runId": new mongoose.Types.ObjectId(finished),
-        })
+      mongoose.connection.db!.collection("screenshots.files").countDocuments({
+        "metadata.runId": new mongoose.Types.ObjectId(finished),
+      })
     expect(await files()).toBe(1)
 
     const active = await DELETE(
