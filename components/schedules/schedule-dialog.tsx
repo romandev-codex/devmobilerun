@@ -14,6 +14,7 @@ import {
 } from "@/components/ui/dialog"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
+import { apiJson } from "@/lib/client/api"
 import type { ScheduleView } from "@/lib/schedules"
 
 export type ScheduleOption = { id: string; name: string }
@@ -63,20 +64,13 @@ export function ScheduleDialog({
       intervalSeconds: Number(interval),
       maxRuns: maxRuns.trim() === "" ? null : Number(maxRuns),
     }
-    const res = await fetch(
+    const res = await apiJson(
       schedule ? `/api/schedules/${schedule.id}` : "/api/schedules",
-      {
-        method: schedule ? "PATCH" : "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify(payload),
-      }
+      schedule ? "PATCH" : "POST",
+      payload
     )
     setBusy(false)
-    if (!res.ok) {
-      const body = await res.json().catch(() => null)
-      setError(body?.error?.message ?? "Could not save schedule")
-      return
-    }
+    if (!res.ok) return setError(res.message)
     onOpenChange(false)
     router.refresh()
   }

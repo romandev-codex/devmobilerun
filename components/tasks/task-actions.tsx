@@ -14,6 +14,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog"
+import { apiFetch } from "@/lib/client/api"
 
 export function TaskActions({
   taskId,
@@ -29,33 +30,37 @@ export function TaskActions({
   const router = useRouter()
   const [confirming, setConfirming] = useState(false)
   const [busy, setBusy] = useState(false)
+  const [error, setError] = useState<string | null>(null)
 
   async function duplicate() {
     setBusy(true)
-    const res = await fetch(`/api/tasks/${taskId}/duplicate`, {
-      method: "POST",
-    })
+    setError(null)
+    const res = await apiFetch<{ task: { id: string } }>(
+      `/api/tasks/${taskId}/duplicate`,
+      { method: "POST" }
+    )
     setBusy(false)
-    if (res.ok) {
-      const body = await res.json()
-      router.push(`/tasks/${body.task.id}`)
-      router.refresh()
-    }
+    if (!res.ok) return setError(res.message)
+    router.push(`/tasks/${res.body.task.id}`)
+    router.refresh()
   }
 
   async function remove() {
     setBusy(true)
-    const res = await fetch(`/api/tasks/${taskId}`, { method: "DELETE" })
+    setError(null)
+    const res = await apiFetch(`/api/tasks/${taskId}`, { method: "DELETE" })
     setBusy(false)
     setConfirming(false)
-    if (res.ok) {
-      router.push(afterDelete)
-      router.refresh()
-    }
+    if (!res.ok) return setError(res.message)
+    router.push(afterDelete)
+    router.refresh()
   }
 
   return (
     <div className="flex items-center gap-1">
+      {error ? (
+        <span className="mr-2 text-xs text-destructive">{error}</span>
+      ) : null}
       <RunTaskButton taskId={taskId} taskName={taskName} />
       <Button
         variant="ghost"

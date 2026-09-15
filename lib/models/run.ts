@@ -1,22 +1,12 @@
 import mongoose, { Schema, type InferSchemaType, type Model } from "mongoose"
 
-export const RUN_STATUSES = [
-  "queued",
-  "running",
-  "succeeded",
-  "failed",
-  "cancelled",
-  "lost",
-  "skipped",
-] as const
-export type RunStatus = (typeof RUN_STATUSES)[number]
-export const TERMINAL_RUN_STATUSES: readonly RunStatus[] = [
-  "succeeded",
-  "failed",
-  "cancelled",
-  "lost",
-  "skipped",
-]
+import { RUN_STATUSES } from "@/lib/run-status"
+
+export {
+  RUN_STATUSES,
+  TERMINAL_RUN_STATUSES,
+  type RunStatus,
+} from "@/lib/run-status"
 
 const runOptionsSchema = new Schema(
   {

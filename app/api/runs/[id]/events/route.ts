@@ -1,16 +1,20 @@
 import { setTimeout as sleepFor } from "node:timers/promises"
 
 import { route } from "@/lib/api/route"
-import { getRun, isTerminal, listRunEvents } from "@/lib/runs/service"
+import { isTerminal } from "@/lib/run-status"
+import { subscribeRun, type RunBusMessage } from "@/lib/runs/bus"
+import { getRun, listRunEvents, type RunEventView } from "@/lib/runs/service"
 
 type Ctx = { params: Promise<{ id: string }> }
 
-const POLL_MS = 1000
+/** Safety net for anything the in-process bus might miss (another writer, a missed emit). */
+const RESYNC_MS = 10_000
 
 /**
- * Browser-facing SSE: replays the stored events of a run, then tails new ones
- * by polling the database until the run reaches a terminal status. A final
- * `status` event carries the finished run.
+ * Browser-facing SSE. Sends the current run, replays stored events after the
+ * client's last seen seq, then forwards live updates pushed by the job in this
+ * process, with a periodic database resync. Ends with a final `status` once
+ * the run is terminal.
  */
 export const GET = route<Ctx>(async (req, { params }) => {
   const { id } = await params
@@ -23,7 +27,9 @@ export const GET = route<Ctx>(async (req, { params }) => {
 
   const stream = new ReadableStream<Uint8Array>({
     async start(controller) {
+      let closed = false
       const send = (event: string, data: unknown, seq?: number) => {
+        if (closed) return
         const idLine = seq !== undefined ? `id: ${seq}\n` : ""
         controller.enqueue(
           encoder.encode(
@@ -31,35 +37,75 @@ export const GET = route<Ctx>(async (req, { params }) => {
           )
         )
       }
-      const sleep = (ms: number) =>
-        sleepFor(ms, undefined, { signal: req.signal }).catch(() => undefined)
+      const sendEvent = (ev: RunEventView) => {
+        if (ev.seq <= after) return
+        send(ev.type, { ...ev.payload, at: ev.at }, ev.seq)
+        after = ev.seq
+      }
+      const finish = async () => {
+        // Anything written between the last replay and the terminal status.
+        for (const ev of await listRunEvents(id, after)) sendEvent(ev)
+        send("status", run)
+        closed = true
+        unsubscribe()
+        controller.close()
+      }
+
+      // Live messages can arrive while we are still replaying; queue them.
+      const pending: RunBusMessage[] = []
+      let replaying = true
+      const onMessage = (message: RunBusMessage) => {
+        if (replaying) pending.push(message)
+        else void handle(message)
+      }
+      const handle = async (message: RunBusMessage) => {
+        if (closed) return
+        if (message.kind === "event") sendEvent(message.event)
+        else {
+          run = message.run
+          if (isTerminal(run.status)) return finish()
+          send("status", run)
+        }
+      }
+      const unsubscribe = subscribeRun(id, onMessage)
+      req.signal.addEventListener("abort", () => {
+        closed = true
+        unsubscribe()
+        try {
+          controller.close()
+        } catch {
+          // already closed
+        }
+      })
 
       try {
         send("status", run)
-        while (!req.signal.aborted) {
-          const events = await listRunEvents(id, after)
-          for (const ev of events) {
-            send(ev.type, { ...ev.payload, at: ev.at }, ev.seq)
-            after = ev.seq
-          }
+        for (const ev of await listRunEvents(id, after)) sendEvent(ev)
+        run = await getRun(id)
+        if (isTerminal(run.status)) return await finish()
+        replaying = false
+        for (const message of pending.splice(0)) await handle(message)
+
+        while (!closed) {
+          await sleepFor(RESYNC_MS, undefined, { signal: req.signal }).catch(
+            () => undefined
+          )
+          if (closed) break
+          for (const ev of await listRunEvents(id, after)) sendEvent(ev)
           run = await getRun(id)
-          if (isTerminal(run.status)) {
-            const rest = await listRunEvents(id, after)
-            for (const ev of rest) {
-              send(ev.type, { ...ev.payload, at: ev.at }, ev.seq)
-              after = ev.seq
-            }
-            send("status", run)
-            break
-          }
-          await sleep(POLL_MS)
+          if (isTerminal(run.status)) return await finish()
         }
       } catch (err) {
         send("error", {
           message: err instanceof Error ? err.message : String(err),
         })
-      } finally {
-        controller.close()
+        closed = true
+        unsubscribe()
+        try {
+          controller.close()
+        } catch {
+          // already closed
+        }
       }
     },
   })

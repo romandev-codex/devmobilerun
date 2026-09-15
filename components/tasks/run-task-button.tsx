@@ -13,6 +13,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog"
+import { apiFetch, apiJson } from "@/lib/client/api"
 import { deviceLabel, type DeviceView } from "@/lib/device-view"
 import { cn } from "@/lib/utils"
 
@@ -36,39 +37,33 @@ export function RunTaskButton({
     setOpen(true)
     setDevices(null)
     setError(null)
-    fetch("/api/devices")
-      .then(async (res) => {
-        const body = await res.json()
-        if (!res.ok)
-          throw new Error(body?.error?.message ?? "Could not load devices")
-        const list = body.devices as DeviceView[]
-        setDevices(list)
-        const first = list.find((d) => d.online && !d.activeRunId)
-        setSelected(first?.serial ?? null)
-      })
-      .catch((err: Error) => {
+    void apiFetch<{ devices: DeviceView[] }>("/api/devices").then((res) => {
+      if (!res.ok) {
         setDevices([])
-        setError(err.message)
-      })
+        setError(res.message)
+        return
+      }
+      setDevices(res.body.devices)
+      const first = res.body.devices.find((d) => d.online && !d.activeRunId)
+      setSelected(first?.serial ?? null)
+    })
   }
 
   async function start() {
     if (!selected) return
     setBusy(true)
     setError(null)
-    const res = await fetch(`/api/tasks/${taskId}/run`, {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ deviceSerial: selected }),
-    })
-    const body = await res.json().catch(() => null)
+    const res = await apiJson<{ run: { id: string } }>(
+      `/api/tasks/${taskId}/run`,
+      "POST",
+      {
+        deviceSerial: selected,
+      }
+    )
     setBusy(false)
-    if (!res.ok) {
-      setError(body?.error?.message ?? "Could not start run")
-      return
-    }
+    if (!res.ok) return setError(res.message)
     setOpen(false)
-    router.push(`/runs/${body.run.id}`)
+    router.push(`/runs/${res.body.run.id}`)
   }
 
   return (

@@ -7,11 +7,11 @@ import { Device } from "@/lib/models/device"
 import {
   Run,
   RUN_STATUSES,
-  TERMINAL_RUN_STATUSES,
   type RunDoc,
   type RunStatus,
 } from "@/lib/models/run"
 import { RunEvent, type RunEventDoc } from "@/lib/models/run-event"
+import { publishRunMessage } from "@/lib/runs/bus"
 import { composeInstruction } from "@/lib/runs/compose"
 import { getTask, type TaskSummary } from "@/lib/tasks"
 
@@ -83,9 +83,9 @@ export function toRunEventView(doc: RunEventDoc): RunEventView {
   }
 }
 
-export function isTerminal(status: RunStatus): boolean {
-  return TERMINAL_RUN_STATUSES.includes(status)
-}
+import { isTerminal } from "@/lib/run-status"
+
+export { isTerminal }
 
 const asObjectId = (id: string, what = "Run") => toObjectId(id, what)
 
@@ -221,7 +221,18 @@ export async function finishRun(
     { _id: runId, status: { $in: ["queued", "running"] } },
     { $set }
   )
+  if (res.matchedCount === 1) await notifyRunStatus(runId)
   return res.matchedCount === 1
+}
+
+async function notifyRunStatus(runId: mongoose.Types.ObjectId): Promise<void> {
+  const doc = await Run.findById(runId).lean<RunDoc>()
+  if (doc)
+    publishRunMessage({
+      kind: "status",
+      runId: runId.toString(),
+      run: toRunView(doc),
+    })
 }
 
 /** Compare-and-set: applies `$set` only if the run is still in `from`. */
@@ -231,6 +242,7 @@ export async function transitionRun(
   $set: Record<string, unknown>
 ): Promise<boolean> {
   const res = await Run.updateOne({ _id: runId, status: from }, { $set })
+  if (res.matchedCount === 1) await notifyRunStatus(runId)
   return res.matchedCount === 1
 }
 
@@ -249,12 +261,23 @@ export async function appendRunEvent(
   event: { seq: number; type: string; payload: Record<string, unknown> }
 ): Promise<void> {
   try {
+    const at = new Date()
     await RunEvent.create({
       runId,
       seq: event.seq,
       type: event.type,
-      at: new Date(),
+      at,
       payload: event.payload,
+    })
+    publishRunMessage({
+      kind: "event",
+      runId: runId.toString(),
+      event: {
+        seq: event.seq,
+        type: event.type,
+        at: at.toISOString(),
+        payload: event.payload,
+      },
     })
   } catch (err) {
     // A duplicate seq means the executor replayed an event we already stored.

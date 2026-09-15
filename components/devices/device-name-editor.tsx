@@ -6,6 +6,7 @@ import { Pencil } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
+import { apiJson } from "@/lib/client/api"
 
 export function DeviceNameEditor({
   serial,
@@ -25,17 +26,13 @@ export function DeviceNameEditor({
   async function save() {
     setSaving(true)
     setError(null)
-    const res = await fetch(`/api/devices/${encodeURIComponent(serial)}`, {
-      method: "PATCH",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ displayName: value }),
-    })
+    const res = await apiJson(
+      `/api/devices/${encodeURIComponent(serial)}`,
+      "PATCH",
+      { displayName: value }
+    )
     setSaving(false)
-    if (!res.ok) {
-      const body = await res.json().catch(() => null)
-      setError(body?.error?.message ?? "Could not save name")
-      return
-    }
+    if (!res.ok) return setError(res.message)
     setEditing(false)
     router.refresh()
   }

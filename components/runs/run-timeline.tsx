@@ -6,15 +6,93 @@ import { RunResultBanner } from "@/components/runs/run-summary"
 import { RunStatusBadge } from "@/components/runs/run-status-badge"
 import { StopRunButton } from "@/components/runs/stop-run-button"
 import type { RunEventView, RunView } from "@/lib/runs/service"
+import { isTerminal } from "@/lib/run-status"
 import { cn } from "@/lib/utils"
 
-const TERMINAL = new Set([
-  "succeeded",
-  "failed",
-  "cancelled",
-  "lost",
-  "skipped",
-])
+type Payload = Record<string, unknown>
+type RowSpec = {
+  label: string
+  labelClass?: (p: Payload) => string
+  body: (p: Payload) => React.ReactNode
+}
+
+const mono = "bg-muted mt-1 overflow-x-auto rounded p-2 font-mono text-xs"
+
+/** One entry per event type; unknown types fall back to a generic row. */
+const ROWS: Record<string, RowSpec> = {
+  thought: {
+    label: "thought",
+    body: (p) => (
+      <div>
+        <p>{String(p.text ?? "")}</p>
+        {p.code ? <pre className={mono}>{String(p.code)}</pre> : null}
+        {p.description ? (
+          <p className="text-xs text-muted-foreground">
+            {String(p.description)}
+          </p>
+        ) : null}
+      </div>
+    ),
+  },
+  action: {
+    label: "action",
+    labelClass: (p) =>
+      p.success === false ? "text-destructive" : "text-muted-foreground",
+    body: (p) => (
+      <div>
+        <p className="font-mono text-xs">
+          {String(p.tool)}({JSON.stringify(p.args ?? {})})
+        </p>
+        {p.summary ? (
+          <p className="text-xs text-muted-foreground">{String(p.summary)}</p>
+        ) : null}
+      </div>
+    ),
+  },
+  plan: {
+    label: "plan",
+    body: (p) => (
+      <div>
+        <p className="font-medium">{String(p.subgoal ?? "")}</p>
+        <pre className="mt-1 text-xs whitespace-pre-wrap text-muted-foreground">
+          {String(p.plan ?? "")}
+        </pre>
+      </div>
+    ),
+  },
+  screenshot: {
+    label: "screen",
+    body: (p) => (
+      <span className="text-xs text-muted-foreground">
+        Step {String(p.step ?? "?")}
+        {p.pruned ? " (image pruned)" : ""}
+      </span>
+    ),
+  },
+  result: { label: "result", body: (p) => <p>{String(p.reason ?? "")}</p> },
+  error: {
+    label: "error",
+    labelClass: () => "text-destructive",
+    body: (p) => <p className="text-destructive">{String(p.message ?? "")}</p>,
+  },
+  log: {
+    label: "log",
+    labelClass: (p) =>
+      p.success === false ? "text-destructive" : "text-muted-foreground",
+    body: (p) => (
+      <p className="text-xs text-muted-foreground">{String(p.message ?? "")}</p>
+    ),
+  },
+}
+
+const fallbackRow = (type: string): RowSpec => ({
+  label: type,
+  body: (p) => (
+    <p className="text-xs text-muted-foreground">
+      {String(p.message ?? JSON.stringify(p))}
+    </p>
+  ),
+})
 
 function EventRow({
   ev,
@@ -25,129 +103,41 @@ function EventRow({
   selected?: boolean
   onSelect?: () => void
 }) {
-  const p = ev.payload as Record<string, unknown>
+  const p = ev.payload as Payload
+  const spec = ROWS[ev.type] ?? fallbackRow(ev.type)
   const time = new Date(ev.at).toLocaleTimeString()
   const base =
     "grid grid-cols-[4.5rem_5rem_1fr] gap-3 border-b py-2 text-sm last:border-b-0"
-  switch (ev.type) {
-    case "thought":
-      return (
-        <div className={base}>
-          <span className="font-mono text-xs text-muted-foreground">
-            {time}
-          </span>
-          <span className="text-xs text-muted-foreground">thought</span>
-          <div>
-            <p>{String(p.text ?? "")}</p>
-            {p.code ? (
-              <pre className="mt-1 overflow-x-auto rounded bg-muted p-2 font-mono text-xs">
-                {String(p.code)}
-              </pre>
-            ) : null}
-            {p.description ? (
-              <p className="text-xs text-muted-foreground">
-                {String(p.description)}
-              </p>
-            ) : null}
-          </div>
-        </div>
-      )
-    case "action":
-      return (
-        <div className={base}>
-          <span className="font-mono text-xs text-muted-foreground">
-            {time}
-          </span>
-          <span
-            className={cn(
-              "text-xs",
-              p.success === false ? "text-destructive" : "text-muted-foreground"
-            )}
-          >
-            action
-          </span>
-          <div>
-            <p className="font-mono text-xs">
-              {String(p.tool)}({JSON.stringify(p.args ?? {})})
-            </p>
-            {p.summary ? (
-              <p className="text-xs text-muted-foreground">
-                {String(p.summary)}
-              </p>
-            ) : null}
-          </div>
-        </div>
-      )
-    case "plan":
-      return (
-        <div className={base}>
-          <span className="font-mono text-xs text-muted-foreground">
-            {time}
-          </span>
-          <span className="text-xs text-muted-foreground">plan</span>
-          <div>
-            <p className="font-medium">{String(p.subgoal ?? "")}</p>
-            <pre className="mt-1 text-xs whitespace-pre-wrap text-muted-foreground">
-              {String(p.plan ?? "")}
-            </pre>
-          </div>
-        </div>
-      )
-    case "screenshot":
-      return (
-        <button
-          type="button"
-          onClick={onSelect}
-          className={cn(
-            base,
-            "w-full text-left",
-            selected && "bg-muted/60",
-            p.pruned ? "cursor-default" : "hover:bg-muted/40"
-          )}
-        >
-          <span className="font-mono text-xs text-muted-foreground">
-            {time}
-          </span>
-          <span className="text-xs text-muted-foreground">screen</span>
-          <span className="text-xs text-muted-foreground">
-            Step {String(p.step ?? "?")}
-            {p.pruned ? " (image pruned)" : ""}
-          </span>
-        </button>
-      )
-    case "result":
-      return (
-        <div className={base}>
-          <span className="font-mono text-xs text-muted-foreground">
-            {time}
-          </span>
-          <span className="text-xs text-muted-foreground">result</span>
-          <p>{String(p.reason ?? "")}</p>
-        </div>
-      )
-    case "error":
-      return (
-        <div className={base}>
-          <span className="font-mono text-xs text-muted-foreground">
-            {time}
-          </span>
-          <span className="text-xs text-destructive">error</span>
-          <p className="text-destructive">{String(p.message ?? "")}</p>
-        </div>
-      )
-    default:
-      return (
-        <div className={base}>
-          <span className="font-mono text-xs text-muted-foreground">
-            {time}
-          </span>
-          <span className="text-xs text-muted-foreground">{ev.type}</span>
-          <p className="text-xs text-muted-foreground">
-            {String(p.message ?? JSON.stringify(p))}
-          </p>
-        </div>
-      )
+  const cells = (
+    <>
+      <span className="font-mono text-xs text-muted-foreground">{time}</span>
+      <span
+        className={cn(
+          "text-xs",
+          spec.labelClass ? spec.labelClass(p) : "text-muted-foreground"
+        )}
+      >
+        {spec.label}
+      </span>
+      {spec.body(p)}
+    </>
+  )
+  if (onSelect) {
+    return (
+      <button
+        type="button"
+        onClick={onSelect}
+        className={cn(
+          base,
+          "w-full text-left hover:bg-muted/40",
+          selected && "bg-muted/60"
+        )}
+      >
+        {cells}
+      </button>
+    )
   }
+  return <div className={cn(base, selected && "bg-muted/60")}>{cells}</div>
 }
 
 /**
@@ -166,11 +156,11 @@ export function RunTimeline({
   const [selectedSeq, setSelectedSeq] = useState<number | null>(null)
   const [connection, setConnection] = useState<
     "connecting" | "live" | "closed"
-  >(() => (TERMINAL.has(initialRun.status) ? "closed" : "connecting"))
+  >(() => (isTerminal(initialRun.status) ? "closed" : "connecting"))
   const bottomRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
-    if (TERMINAL.has(initialRun.status)) return
+    if (isTerminal(initialRun.status)) return
     const lastSeq = initialEvents.length
       ? initialEvents[initialEvents.length - 1].seq
       : -1
@@ -181,7 +171,7 @@ export function RunTimeline({
       const next = JSON.parse(e.data) as RunView
       setRun(next)
       setConnection("live")
-      if (TERMINAL.has(next.status)) {
+      if (isTerminal(next.status)) {
         source.close()
         setConnection("closed")
       }
@@ -234,7 +224,7 @@ export function RunTimeline({
       <div className="flex items-center justify-between">
         <h2 className="text-sm font-medium">Timeline</h2>
         <span className="flex items-center gap-2 text-xs text-muted-foreground">
-          {!TERMINAL.has(run.status) ? <StopRunButton runId={run.id} /> : null}
+          {!isTerminal(run.status) ? <StopRunButton runId={run.id} /> : null}
           <RunStatusBadge status={run.status} />
           {connection === "live"
             ? "live"

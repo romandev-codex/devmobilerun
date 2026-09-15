@@ -5,6 +5,7 @@ import { useState } from "react"
 import { Trash2 } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
+import { apiFetch } from "@/lib/client/api"
 
 export function DeleteRunButton({
   runId,
@@ -20,13 +21,9 @@ export function DeleteRunButton({
   async function remove() {
     if (!confirm("Delete this run and its screenshots?")) return
     setBusy(true)
-    const res = await fetch(`/api/runs/${runId}`, { method: "DELETE" })
+    const res = await apiFetch(`/api/runs/${runId}`, { method: "DELETE" })
     setBusy(false)
-    if (!res.ok) {
-      const body = await res.json().catch(() => null)
-      setError(body?.error?.message ?? "Could not delete run")
-      return
-    }
+    if (!res.ok) return setError(res.message)
     router.push(`/tasks/${taskId}?tab=history`)
     router.refresh()
   }

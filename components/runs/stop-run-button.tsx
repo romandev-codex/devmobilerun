@@ -4,15 +4,14 @@ import { useState } from "react"
 import { Square } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
+import { apiFetch } from "@/lib/client/api"
 
 export function StopRunButton({
   runId,
   disabled,
-  onStopped,
 }: {
   runId: string
   disabled?: boolean
-  onStopped?: () => void
 }) {
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -22,14 +21,9 @@ export function StopRunButton({
       return
     setBusy(true)
     setError(null)
-    const res = await fetch(`/api/runs/${runId}/stop`, { method: "POST" })
+    const res = await apiFetch(`/api/runs/${runId}/stop`, { method: "POST" })
     setBusy(false)
-    if (!res.ok) {
-      const body = await res.json().catch(() => null)
-      setError(body?.error?.message ?? "Could not stop run")
-      return
-    }
-    onStopped?.()
+    if (!res.ok) setError(res.message)
   }
 
   return (

@@ -4,6 +4,7 @@ import { useRouter } from "next/navigation"
 import { useState } from "react"
 
 import { Button } from "@/components/ui/button"
+import { apiJson } from "@/lib/client/api"
 import {
   Card,
   CardContent,
@@ -33,23 +34,12 @@ export function SettingsForm({ settings }: { settings: SettingsView }) {
     e.preventDefault()
     setSaving(true)
     setStatus(null)
-    const res = await fetch("/api/settings", {
-      method: "PATCH",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({
-        screenshotIntervalMs: Number(intervalMs),
-        screenshotRetentionRuns: Number(retention),
-      }),
+    const res = await apiJson("/api/settings", "PATCH", {
+      screenshotIntervalMs: Number(intervalMs),
+      screenshotRetentionRuns: Number(retention),
     })
     setSaving(false)
-    if (!res.ok) {
-      const body = await res.json().catch(() => null)
-      setStatus({
-        kind: "error",
-        text: body?.error?.message ?? "Could not save",
-      })
-      return
-    }
+    if (!res.ok) return setStatus({ kind: "error", text: res.message })
     setStatus({ kind: "ok", text: "Saved" })
     router.refresh()
   }

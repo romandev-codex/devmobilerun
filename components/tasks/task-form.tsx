@@ -16,6 +16,7 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Switch } from "@/components/ui/switch"
 import { Textarea } from "@/components/ui/textarea"
+import { apiJson } from "@/lib/client/api"
 import type { TaskView } from "@/lib/tasks"
 
 type StartKind = "none" | "url" | "instruction"
@@ -77,18 +78,14 @@ export function TaskForm({ task }: { task?: TaskView }) {
     e.preventDefault()
     setSaving(true)
     setError(null)
-    const res = await fetch(task ? `/api/tasks/${task.id}` : "/api/tasks", {
-      method: task ? "PATCH" : "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify(toPayload(form)),
-    })
-    const body = await res.json().catch(() => null)
+    const res = await apiJson<{ task: { id: string } }>(
+      task ? `/api/tasks/${task.id}` : "/api/tasks",
+      task ? "PATCH" : "POST",
+      toPayload(form)
+    )
     setSaving(false)
-    if (!res.ok) {
-      setError(body?.error?.message ?? "Could not save task")
-      return
-    }
-    router.push(`/tasks/${body.task.id}`)
+    if (!res.ok) return setError(res.message)
+    router.push(`/tasks/${res.body.task.id}`)
     router.refresh()
   }
 

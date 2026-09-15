@@ -11,6 +11,7 @@ import {
 } from "@/components/schedules/schedule-dialog"
 import { Button } from "@/components/ui/button"
 import { Switch } from "@/components/ui/switch"
+import { apiFetch, apiJson } from "@/lib/client/api"
 import type { ScheduleView } from "@/lib/schedules"
 
 export function ScheduleRowActions({
@@ -27,18 +28,19 @@ export function ScheduleRowActions({
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
-  async function call(input: string, init: RequestInit) {
+  async function act<T>(
+    request: Promise<{ ok: true; body: T } | { ok: false; message: string }>
+  ) {
     setBusy(true)
     setError(null)
-    const res = await fetch(input, init)
+    const res = await request
     setBusy(false)
     if (!res.ok) {
-      const body = await res.json().catch(() => null)
-      setError(body?.error?.message ?? "Request failed")
+      setError(res.message)
       return null
     }
     router.refresh()
-    return res.json().catch(() => ({}))
+    return res.body
   }
 
   return (
@@ -51,11 +53,7 @@ export function ScheduleRowActions({
         disabled={busy}
         aria-label={schedule.enabled ? "Disable schedule" : "Enable schedule"}
         onCheckedChange={(enabled) =>
-          call(`/api/schedules/${schedule.id}`, {
-            method: "PATCH",
-            headers: { "content-type": "application/json" },
-            body: JSON.stringify({ enabled }),
-          })
+          act(apiJson(`/api/schedules/${schedule.id}`, "PATCH", { enabled }))
         }
       />
       <Button
@@ -64,9 +62,11 @@ export function ScheduleRowActions({
         title="Run now"
         disabled={busy}
         onClick={async () => {
-          const body = await call(`/api/schedules/${schedule.id}/run`, {
-            method: "POST",
-          })
+          const body = await act(
+            apiFetch<{ runId: string }>(`/api/schedules/${schedule.id}/run`, {
+              method: "POST",
+            })
+          )
           if (body?.runId) router.push(`/runs/${body.runId}`)
         }}
       >
@@ -88,7 +88,9 @@ export function ScheduleRowActions({
         disabled={busy}
         onClick={() => {
           if (confirm("Delete this schedule?"))
-            void call(`/api/schedules/${schedule.id}`, { method: "DELETE" })
+            void act(
+              apiFetch(`/api/schedules/${schedule.id}`, { method: "DELETE" })
+            )
         }}
       >
         <Trash2 className="size-4" />
