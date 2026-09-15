@@ -8,6 +8,7 @@ const uri = new URL(baseUri)
 uri.pathname = `/${dbName}`
 
 process.env.MONGODB_URI = uri.toString()
+process.env.MONGODB_DB = dbName
 process.env.EXECUTOR_TOKEN = process.env.EXECUTOR_TOKEN ?? "test-token"
 process.env.EXECUTOR_URL = process.env.EXECUTOR_URL ?? "http://127.0.0.1:1"
 

@@ -3,7 +3,7 @@ import mongoose from "mongoose"
 import { notFound } from "@/lib/api/errors"
 import { getEnv } from "@/lib/env"
 
-type Cached = { conn?: Promise<typeof mongoose>; uri?: string }
+type Cached = { conn?: Promise<typeof mongoose>; key?: string }
 
 const globalForMongoose = globalThis as unknown as { __mongoose?: Cached }
 const cached: Cached =
@@ -11,14 +11,17 @@ const cached: Cached =
 
 /**
  * Connects once per process and reuses the connection across hot reloads and
- * route handler invocations.
+ * route handler invocations. `dbName` (MONGODB_DB) overrides the database in
+ * the URI path; without it the URI's database is used.
  */
 export function connectDb(
-  uri: string = getEnv().MONGODB_URI
+  uri: string = getEnv().MONGODB_URI,
+  dbName: string | undefined = getEnv().MONGODB_DB
 ): Promise<typeof mongoose> {
-  if (!cached.conn || cached.uri !== uri) {
-    cached.uri = uri
-    cached.conn = mongoose.connect(uri).catch((err) => {
+  const key = `${uri}|${dbName ?? ""}`
+  if (!cached.conn || cached.key !== key) {
+    cached.key = key
+    cached.conn = mongoose.connect(uri, { dbName }).catch((err) => {
       cached.conn = undefined
       throw err
     })
@@ -30,7 +33,7 @@ export async function disconnectDb(): Promise<void> {
   if (cached.conn) {
     await mongoose.disconnect()
     cached.conn = undefined
-    cached.uri = undefined
+    cached.key = undefined
   }
 }
 

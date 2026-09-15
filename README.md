@@ -72,6 +72,7 @@ npm run check                   # typecheck + lint + both test suites
 | Variable           | Used by  | Meaning                                                                            |
 | ------------------ | -------- | ---------------------------------------------------------------------------------- |
 | `MONGODB_URI`      | app      | MongoDB connection string                                                          |
+| `MONGODB_DB`       | app      | Database name; overrides the database in `MONGODB_URI` when set                    |
 | `EXECUTOR_URL`     | app      | Base URL of the executor, default `http://127.0.0.1:8765`                          |
 | `EXECUTOR_TOKEN`   | both     | Shared secret sent as `X-Mobilerun-Token`; the executor refuses to start without it |
 | `EXECUTOR_HOST`    | executor | Bind address, default `127.0.0.1`                                                  |
