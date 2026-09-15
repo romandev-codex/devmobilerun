@@ -4,7 +4,7 @@
 
 **Blocked by:** 01 Foundation
 
-**Status:** ready-for-agent
+**Status:** done
 
 - [ ] `tasks` collection matching the spec schema; `GET|POST /api/tasks`, `GET|PATCH|DELETE /api/tasks/:id`, `POST /api/tasks/:id/duplicate` with Zod validation (goal required, start type is url or instruction, URL validated, max steps a positive integer, variable keys unique and identifier-like)
 - [ ] Task form page for new and existing tasks with all fields, variables editor, and validation messages

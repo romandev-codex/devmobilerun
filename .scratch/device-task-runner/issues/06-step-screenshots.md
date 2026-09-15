@@ -4,7 +4,7 @@
 
 **Blocked by:** 05 Run task now
 
-**Status:** ready-for-agent
+**Status:** done
 
 - [ ] Executor enables screenshot streaming for every run and emits `screenshot` SSE events with base64 PNG and step index, even with vision off
 - [ ] `run-task` writes each screenshot to a GridFS bucket with run id and step metadata and stores the file id in the event payload

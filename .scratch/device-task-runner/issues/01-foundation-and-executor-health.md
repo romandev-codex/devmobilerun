@@ -4,7 +4,7 @@
 
 **Blocked by:** None (can start immediately)
 
-**Status:** ready-for-agent
+**Status:** done
 
 - [ ] `api/` folder contains a FastAPI app with `GET /health` returning status, service version and mobilerun version, and `GET /config` returning provider and model per agent role from the framework config
 - [ ] Every executor endpoint rejects requests without a correct `X-Mobilerun-Token` header with 401

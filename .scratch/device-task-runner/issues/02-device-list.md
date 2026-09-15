@@ -4,7 +4,7 @@
 
 **Blocked by:** 01 Foundation
 
-**Status:** ready-for-agent
+**Status:** done
 
 - [ ] Executor `GET /devices` returns serial, model and state for each adb device
 - [ ] `devices` collection upserts from the executor list on every `GET /api/devices`, marking devices missing from the list as offline while keeping their document

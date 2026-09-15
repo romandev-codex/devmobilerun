@@ -4,7 +4,7 @@
 
 **Blocked by:** 05 Run task now
 
-**Status:** ready-for-agent
+**Status:** done
 
 - [ ] `run-task` that starts and finds its run already in `running` marks it `lost` and exits without contacting the executor
 - [ ] Executor unreachable at start, or SSE drop before a terminal event, results in status `failed` with the error message and a released device lock

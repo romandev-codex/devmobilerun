@@ -4,7 +4,7 @@
 
 **Blocked by:** 02 Device list
 
-**Status:** ready-for-agent
+**Status:** done
 
 - [ ] Executor `GET /devices/{serial}/screenshot` returns PNG bytes; 404 for unknown serial
 - [ ] `GET /api/devices/:serial/screenshot` proxies the executor with a cache no shorter than the configured interval, so several open cards do not multiply adb calls

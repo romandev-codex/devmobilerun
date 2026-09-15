@@ -4,7 +4,7 @@
 
 **Blocked by:** 05 Run task now
 
-**Status:** ready-for-agent
+**Status:** done
 
 - [ ] `settings.prompts` keyed by the framework's prompt roles and `settings.appCards` list, editable with validation on the Settings page
 - [ ] `run-task` includes the current prompts and app cards in `POST /runs`; the executor passes prompts to `MobileAgent` and provides app cards through an in-memory app card provider for that run

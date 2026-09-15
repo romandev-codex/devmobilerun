@@ -4,7 +4,7 @@
 
 **Blocked by:** 10 Schedules basic
 
-**Status:** ready-for-agent
+**Status:** done
 
 - [ ] `maxRuns` nullable on schedules; the tick disables the schedule and cancels its job once `runCount` reaches `maxRuns`; skipped runs do not increment `runCount`
 - [ ] `PATCH` on a schedule re-plans its Agenda job when interval, device or maximum change

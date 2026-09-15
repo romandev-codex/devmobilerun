@@ -4,7 +4,7 @@
 
 **Blocked by:** 06 Step screenshots
 
-**Status:** ready-for-agent
+**Status:** done
 
 - [ ] `GET /api/runs` with filters for task, device, status and trigger, paginated, newest first
 - [ ] `DELETE /api/runs/:id` removes the run, its events and its GridFS files; refused while the run is active

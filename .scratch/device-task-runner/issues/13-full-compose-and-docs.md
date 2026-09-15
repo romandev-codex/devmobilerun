@@ -4,7 +4,7 @@
 
 **Blocked by:** 11 Schedules max runs and resume, 12 Global prompts and app cards
 
-**Status:** ready-for-agent
+**Status:** done
 
 - [ ] `docker-compose.yml` defines mongo, executor and app services; the executor service is documented as optional with the host-run default for USB adb
 - [ ] Executor Dockerfile and app Dockerfile build successfully

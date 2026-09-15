@@ -4,7 +4,7 @@
 
 **Blocked by:** 02 Device list, 04 Task CRUD
 
-**Status:** ready-for-agent
+**Status:** done
 
 - [ ] Executor `POST /runs` accepts run id, device serial, optional start URL, instruction, options and variables; opens the start URL through an adb VIEW intent; builds `MobileAgent` from the framework config with per-run overrides, trajectory saving disabled; 409 when the device already has an active run; 404 for unknown device
 - [ ] Executor `GET /runs/{id}/events` streams SSE events `started`, `thought`, `action`, `plan`, `log`, `result`, `error` mapped from framework events and ends after a terminal event; `GET /runs` lists active runs

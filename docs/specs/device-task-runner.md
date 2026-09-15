@@ -1,6 +1,6 @@
 # Spec: Device Task Runner (app UI + execution API)
 
-Status: ready-for-agent
+Status: implemented (see git history); review follow-ups applied
 Repos: `app/mobilerun` (Next.js UI + data), new `api/` folder in the same repo (Python execution service). The `mobilerun` framework repo is not modified.
 
 ## Problem Statement

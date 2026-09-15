@@ -4,7 +4,7 @@
 
 **Blocked by:** 05 Run task now
 
-**Status:** ready-for-agent
+**Status:** done
 
 - [ ] `schedules` collection matching the spec; `GET|POST /api/schedules`, `GET|PATCH|DELETE /api/schedules/:id` with validation (interval a positive integer, task and device must exist)
 - [ ] `schedule-tick` Agenda job: exits and cancels itself if the schedule is disabled or deleted; creates a `skipped` run when the device lock is held; otherwise creates a run, executes the run-task logic inline, increments `runCount`, and schedules the next tick `intervalSeconds` after the run finished

@@ -4,7 +4,7 @@
 
 **Blocked by:** 05 Run task now
 
-**Status:** ready-for-agent
+**Status:** done
 
 - [ ] Executor `POST /runs/{id}/stop` cancels the run's asyncio task, emits `cancelled` on the SSE stream, removes it from the active map; 404 for unknown run
 - [ ] `POST /api/runs/:id/stop` forwards to the executor; `run-task` sets status cancelled and releases the device lock
