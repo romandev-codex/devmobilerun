@@ -1,8 +1,10 @@
 import { getEnv } from "@/lib/env"
+import { parseSse, type SseMessage } from "@/lib/executor/sse"
 import type {
   ExecutorConfig,
   ExecutorDevice,
   ExecutorHealth,
+  StartRunRequest,
 } from "@/lib/executor/types"
 
 export type ExecutorErrorCode =
@@ -70,6 +72,34 @@ export const executor = {
   health: () => executorJson<ExecutorHealth>("/health"),
   config: () => executorJson<ExecutorConfig>("/config"),
   devices: () => executorJson<ExecutorDevice[]>("/devices"),
+  startRun: (body: StartRunRequest) =>
+    executorJson<{ runId: string }>("/runs", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(body),
+    }),
+  stopRun: (runId: string) =>
+    executorJson<{ runId: string }>(`/runs/${encodeURIComponent(runId)}/stop`, {
+      method: "POST",
+    }),
+  activeRuns: () =>
+    executorJson<{ runId: string; deviceSerial: string; startedAt: number }[]>(
+      "/runs"
+    ),
+  /** Streams a run's events until the executor closes the stream. */
+  runEvents: async function* (
+    runId: string,
+    afterSeq?: number
+  ): AsyncGenerator<SseMessage> {
+    const headers: Record<string, string> = {}
+    if (afterSeq !== undefined) headers["Last-Event-ID"] = String(afterSeq)
+    const res = await executorFetch(
+      `/runs/${encodeURIComponent(runId)}/events`,
+      { headers }
+    )
+    if (!res.body) return
+    yield* parseSse(res.body)
+  },
   screenshot: async (serial: string): Promise<Uint8Array> => {
     const res = await executorFetch(
       `/devices/${encodeURIComponent(serial)}/screenshot`

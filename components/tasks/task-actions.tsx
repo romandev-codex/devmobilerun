@@ -2,8 +2,9 @@
 
 import { useRouter } from "next/navigation"
 import { useState } from "react"
-import { Copy, Play, Trash2 } from "lucide-react"
+import { Copy, Trash2 } from "lucide-react"
 
+import { RunTaskButton } from "@/components/tasks/run-task-button"
 import { Button } from "@/components/ui/button"
 import {
   Dialog,
@@ -55,14 +56,7 @@ export function TaskActions({
 
   return (
     <div className="flex items-center gap-1">
-      <Button
-        variant="outline"
-        size="sm"
-        disabled
-        title="Available once runs are implemented"
-      >
-        <Play className="size-4" /> Run
-      </Button>
+      <RunTaskButton taskId={taskId} taskName={taskName} />
       <Button
         variant="ghost"
         size="sm"

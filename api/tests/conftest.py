@@ -3,7 +3,11 @@ from __future__ import annotations
 import pytest
 from httpx import ASGITransport, AsyncClient
 
-from executor.framework import ConfigSummary, DeviceInfo, DeviceNotFound, LlmProfile
+import asyncio
+from typing import AsyncIterator
+
+from executor.events import RunEvent
+from executor.framework import ConfigSummary, DeviceInfo, DeviceNotFound, LlmProfile, RunSpec
 from executor.main import create_app
 from executor.settings import Settings
 
@@ -22,6 +26,15 @@ class FakeFramework:
             DeviceInfo(serial="emulator-5554", state="device", model="sdk_gphone64"),
             DeviceInfo(serial="ZY22ABCD", state="unauthorized", model=None),
         ]
+        self.opened_urls: list[tuple[str, str]] = []
+        self.specs: list[RunSpec] = []
+        # Script: list of RunEvents or floats (sleep seconds) consumed by the next run.
+        self.script: list[RunEvent | float] = [
+            RunEvent("thought", {"text": "Looking at the screen", "source": "fast_agent"}),
+            RunEvent("action", {"tool": "tap", "args": {"index": 3}, "success": True, "summary": "Tapped"}),
+            RunEvent("result", {"success": True, "reason": "Done", "steps": 2}),
+        ]
+        self.cancelled: list[str] = []
 
     def version(self) -> str:
         return "9.9.9-fake"
@@ -36,6 +49,30 @@ class FakeFramework:
         if not any(d.serial == serial and d.state == "device" for d in self.devices):
             raise DeviceNotFound(serial)
         return PNG_BYTES
+
+    async def open_url(self, serial: str, url: str) -> None:
+        self.opened_urls.append((serial, url))
+
+    def create_run(self, spec: RunSpec) -> "FakeAgentRun":
+        self.specs.append(spec)
+        return FakeAgentRun(self, spec, list(self.script))
+
+
+class FakeAgentRun:
+    def __init__(self, framework: FakeFramework, spec: RunSpec, script: list[RunEvent | float]):
+        self.framework = framework
+        self.spec = spec
+        self.script = script
+
+    async def events(self) -> AsyncIterator[RunEvent]:
+        for item in self.script:
+            if isinstance(item, float):
+                await asyncio.sleep(item)
+            else:
+                yield item
+
+    async def cancel(self) -> None:
+        self.framework.cancelled.append(self.spec.run_id)
 
 
 PNG_BYTES = b"\x89PNG\r\n\x1a\n" + b"fake-image-" + b"0" * 32

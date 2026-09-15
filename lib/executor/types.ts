@@ -20,3 +20,14 @@ export type ExecutorDevice = {
   state: string
   model: string | null
 }
+
+export type StartRunRequest = {
+  runId: string
+  deviceSerial: string
+  instruction: string
+  startUrl?: string | null
+  options: { vision: boolean; reasoning: boolean; maxSteps: number }
+  variables: Record<string, string>
+  prompts?: Record<string, string>
+  appCards?: unknown[]
+}

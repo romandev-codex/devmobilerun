@@ -10,6 +10,34 @@ export type FakeHandler = (
   }
 ) => void | Promise<void>
 
+export type SseScript = {
+  id?: number
+  event: string
+  data: unknown
+  delayMs?: number
+}[]
+
+/** Writes a scripted SSE stream and closes it. */
+export async function writeSse(
+  res: http.ServerResponse,
+  script: SseScript
+): Promise<void> {
+  res.writeHead(200, {
+    "content-type": "text/event-stream",
+    "cache-control": "no-store",
+  })
+  let seq = 0
+  for (const item of script) {
+    if (item.delayMs) await new Promise((r) => setTimeout(r, item.delayMs))
+    const id = item.id ?? seq
+    seq = id + 1
+    res.write(
+      `id: ${id}\nevent: ${item.event}\ndata: ${JSON.stringify(item.data)}\n\n`
+    )
+  }
+  res.end()
+}
+
 export type FakeExecutor = {
   url: string
   token: string

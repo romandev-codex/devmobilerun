@@ -1,0 +1,85 @@
+import mongoose, { Schema, type InferSchemaType, type Model } from "mongoose"
+
+export const RUN_STATUSES = [
+  "queued",
+  "running",
+  "succeeded",
+  "failed",
+  "cancelled",
+  "lost",
+  "skipped",
+] as const
+export type RunStatus = (typeof RUN_STATUSES)[number]
+export const TERMINAL_RUN_STATUSES: readonly RunStatus[] = [
+  "succeeded",
+  "failed",
+  "cancelled",
+  "lost",
+  "skipped",
+]
+
+const runOptionsSchema = new Schema(
+  {
+    vision: { type: Boolean, required: true },
+    reasoning: { type: Boolean, required: true },
+    maxSteps: { type: Number, required: true },
+  },
+  { _id: false }
+)
+
+const runSchema = new Schema(
+  {
+    taskId: {
+      type: Schema.Types.ObjectId,
+      ref: "Task",
+      required: true,
+      index: true,
+    },
+    taskName: { type: String, required: true },
+    scheduleId: {
+      type: Schema.Types.ObjectId,
+      ref: "Schedule",
+      default: null,
+      index: true,
+    },
+    deviceSerial: { type: String, required: true, index: true },
+    status: {
+      type: String,
+      enum: RUN_STATUSES,
+      required: true,
+      default: "queued",
+      index: true,
+    },
+    trigger: { type: String, enum: ["manual", "schedule"], required: true },
+    instruction: { type: String, required: true },
+    startUrl: { type: String, default: null },
+    options: { type: runOptionsSchema, required: true },
+    variables: { type: Schema.Types.Mixed, default: {} },
+    startedAt: { type: Date, default: null },
+    finishedAt: { type: Date, default: null },
+    result: {
+      type: new Schema(
+        {
+          success: { type: Boolean, required: true },
+          reason: { type: String, default: "" },
+          steps: { type: Number, default: 0 },
+        },
+        { _id: false }
+      ),
+      default: null,
+    },
+    error: { type: String, default: null },
+    skipReason: { type: String, default: null },
+  },
+  { timestamps: true }
+)
+
+export type RunDoc = InferSchemaType<typeof runSchema> & {
+  _id: mongoose.Types.ObjectId
+  createdAt: Date
+  updatedAt: Date
+}
+
+export const Run: Model<RunDoc> =
+  (mongoose.models.Run as Model<RunDoc>) ??
+  mongoose.model<RunDoc>("Run", runSchema)

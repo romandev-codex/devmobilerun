@@ -6,7 +6,8 @@ from fastapi.responses import JSONResponse
 
 from . import __version__
 from .framework import Framework, MobilerunFramework
-from .routers import config, devices, health
+from .routers import config, devices, health, runs
+from .runs import RunManager
 from .settings import Settings
 
 
@@ -14,6 +15,7 @@ def create_app(settings: Settings, framework: Framework | None = None) -> FastAP
     app = FastAPI(title="mobilerun executor", version=__version__)
     app.state.settings = settings
     app.state.framework = framework or MobilerunFramework()
+    app.state.runs = RunManager(app.state.framework)
 
     @app.exception_handler(HTTPException)
     async def http_error(_: Request, exc: HTTPException) -> JSONResponse:
@@ -35,11 +37,15 @@ def create_app(settings: Settings, framework: Framework | None = None) -> FastAP
     app.include_router(health.router)
     app.include_router(config.router)
     app.include_router(devices.router)
+    app.include_router(runs.router)
     return app
 
 
 def run() -> None:
+    import os
+
     import uvicorn
 
+    os.environ.setdefault("MOBILERUN_STREAM_SCREENSHOTS", "1")
     settings = Settings.from_env()
     uvicorn.run(create_app(settings), host=settings.host, port=settings.port)
