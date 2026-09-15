@@ -34,6 +34,15 @@ npm install
 
 ## Run in development
 
+The short way, once `make setup` has run:
+
+```bash
+make dev        # MongoDB (Docker or Homebrew) + executor + app, Ctrl+C stops all
+make check      # typecheck, lint and both test suites
+```
+
+Or each process by hand:
+
 ```bash
 docker compose up -d            # 1. MongoDB (or: brew services start mongodb-community)
 EXECUTOR_TOKEN=change-me npm run executor   # 2. executor on the host, port 8765
