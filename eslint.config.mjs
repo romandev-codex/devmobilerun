@@ -12,6 +12,9 @@ const eslintConfig = defineConfig([
     "out/**",
     "build/**",
     "next-env.d.ts",
+    // Python executor (virtualenv contains vendored JS) and local scratch files.
+    "api/**",
+    ".scratch/**",
   ]),
 ]);
 
