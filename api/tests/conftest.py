@@ -3,7 +3,7 @@ from __future__ import annotations
 import pytest
 from httpx import ASGITransport, AsyncClient
 
-from executor.framework import ConfigSummary, LlmProfile
+from executor.framework import ConfigSummary, DeviceInfo, LlmProfile
 from executor.main import create_app
 from executor.settings import Settings
 
@@ -18,12 +18,19 @@ class FakeFramework:
             LlmProfile(role="fast_agent", provider="OpenAI", model="gpt-test"),
             LlmProfile(role="manager", provider="Anthropic", model="claude-test"),
         ]
+        self.devices = [
+            DeviceInfo(serial="emulator-5554", state="device", model="sdk_gphone64"),
+            DeviceInfo(serial="ZY22ABCD", state="unauthorized", model=None),
+        ]
 
     def version(self) -> str:
         return "9.9.9-fake"
 
     def describe_config(self) -> ConfigSummary:
         return ConfigSummary(profiles=list(self.profiles), config_path="/fake/config.yaml")
+
+    async def list_devices(self) -> list[DeviceInfo]:
+        return list(self.devices)
 
 
 @pytest.fixture

@@ -27,3 +27,9 @@ class ErrorBody(BaseModel):
 
 class ErrorResponse(BaseModel):
     error: ErrorBody
+
+
+class DeviceResponse(BaseModel):
+    serial: str
+    state: str
+    model: str | None = None

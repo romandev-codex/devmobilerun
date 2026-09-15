@@ -1,5 +1,9 @@
 import { getEnv } from "@/lib/env"
-import type { ExecutorConfig, ExecutorHealth } from "@/lib/executor/types"
+import type {
+  ExecutorConfig,
+  ExecutorDevice,
+  ExecutorHealth,
+} from "@/lib/executor/types"
 
 export type ExecutorErrorCode =
   "unreachable" | "unauthorized" | "not_found" | "conflict" | "http"
@@ -65,4 +69,5 @@ async function executorJson<T>(path: string, init?: RequestInit): Promise<T> {
 export const executor = {
   health: () => executorJson<ExecutorHealth>("/health"),
   config: () => executorJson<ExecutorConfig>("/config"),
+  devices: () => executorJson<ExecutorDevice[]>("/devices"),
 }

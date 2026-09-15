@@ -14,3 +14,9 @@ export type ExecutorConfig = {
   profiles: LlmProfileInfo[]
   configPath: string | null
 }
+
+export type ExecutorDevice = {
+  serial: string
+  state: string
+  model: string | null
+}

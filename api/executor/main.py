@@ -6,7 +6,7 @@ from fastapi.responses import JSONResponse
 
 from . import __version__
 from .framework import Framework, MobilerunFramework
-from .routers import config, health
+from .routers import config, devices, health
 from .settings import Settings
 
 
@@ -34,6 +34,7 @@ def create_app(settings: Settings, framework: Framework | None = None) -> FastAP
 
     app.include_router(health.router)
     app.include_router(config.router)
+    app.include_router(devices.router)
     return app
 
 

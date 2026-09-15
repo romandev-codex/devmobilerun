@@ -23,10 +23,19 @@ class ConfigSummary:
     config_path: str | None
 
 
+@dataclass(frozen=True)
+class DeviceInfo:
+    serial: str
+    state: str  # raw adb state: device | offline | unauthorized | ...
+    model: str | None = None
+
+
 class Framework(Protocol):
     def version(self) -> str: ...
 
     def describe_config(self) -> ConfigSummary: ...
+
+    async def list_devices(self) -> list[DeviceInfo]: ...
 
 
 class MobilerunFramework:
@@ -53,3 +62,19 @@ class MobilerunFramework:
         env_path = os.environ.get("MOBILERUN_CONFIG")
         config_path = env_path if env_path else str(ConfigLoader.get_user_config_path())
         return ConfigSummary(profiles=profiles, config_path=config_path)
+
+    async def list_devices(self) -> list[DeviceInfo]:
+        from async_adbutils import adb
+
+        infos = await adb.list()
+        devices: list[DeviceInfo] = []
+        for info in infos:
+            model: str | None = None
+            if info.state == "device":
+                try:
+                    device = await adb.device(serial=info.serial)
+                    model = (await device.getprop("ro.product.model")).strip() or None
+                except Exception:  # noqa: BLE001 - a flaky device must not break the listing
+                    model = None
+            devices.append(DeviceInfo(serial=info.serial, state=info.state, model=model))
+        return devices
