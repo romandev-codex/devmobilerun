@@ -61,19 +61,19 @@ but were not built on a machine without Docker; report issues you hit.
 
 ## Production: one container with everything
 
-`Dockerfile.aio` builds a single image containing MongoDB, the executor and the app,
-supervised together; only port 3000 is published.
+`Dockerfile.aio` builds a single image containing the executor and the app,
+supervised together; only port 3000 is published. MongoDB is not included: point
+`MONGODB_URI` at a hosted cluster (e.g. MongoDB Atlas).
 
 ```bash
 docker build -f Dockerfile.aio -t mobilerun:latest .
-docker run -d -p 3000:3000 -v mobilerun-data:/data/db -v mobilerun-config:/config \
-  -e OPENROUTER_API_KEY=... mobilerun:latest
+docker run -d -p 3000:3000 -v mobilerun-config:/config \
+  -e MONGODB_URI='mongodb+srv://...' -e OPENROUTER_API_KEY=... mobilerun:latest
 ```
 
 Or `docker compose -f docker-compose.prod.yml up -d --build`. The framework config is
-seeded into the `/config` volume on first start, and `MONGODB_URI` pointing at an
-external server switches the built-in MongoDB off. See [docker/README.md](docker/README.md)
-for USB/adb, backups and day-to-day operation.
+seeded into the `/config` volume on first start. See [docker/README.md](docker/README.md)
+for USB/adb and day-to-day operation.
 
 ## Tests and checks
 

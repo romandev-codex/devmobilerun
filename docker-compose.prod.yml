@@ -1,6 +1,7 @@
-# Production: one container with MongoDB, the executor and the app inside.
+# Production: one container with the executor and the app inside; MongoDB is
+# external (e.g. Atlas), so MONGODB_URI is required.
 #
-#   EXECUTOR_TOKEN=$(openssl rand -hex 24) docker compose -f docker-compose.prod.yml up -d --build
+#   MONGODB_URI='mongodb+srv://...' docker compose -f docker-compose.prod.yml up -d --build
 #
 # Phones must be reachable over network adb (`adb connect <ip>`) unless the host
 # is Linux and you pass USB devices through; see docker/README.md.
@@ -16,13 +17,12 @@ services:
     environment:
       # Optional: leave unset and the container generates one at start.
       EXECUTOR_TOKEN: ${EXECUTOR_TOKEN:-}
-      # Point this at an external MongoDB to switch off the embedded one.
-      MONGODB_URI: ${MONGODB_URI:-mongodb://127.0.0.1:27017/mobilerun}
+      # External MongoDB, e.g. mongodb+srv://user:pass@cluster.example.mongodb.net/
+      MONGODB_URI: ${MONGODB_URI:?set MONGODB_URI to your MongoDB connection string}
       MONGODB_DB: ${MONGODB_DB:-mobilerun}
       # The provider key for the models in /config/config.yaml.
       OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:-}
     volumes:
-      - mongo-data:/data/db
       - config:/config
     # USB phones on a Linux host: uncomment both lines.
     # privileged: true
@@ -30,5 +30,4 @@ services:
     #   - /dev/bus/usb:/dev/bus/usb
 
 volumes:
-  mongo-data:
   config:

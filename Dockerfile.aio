@@ -1,12 +1,12 @@
-# All-in-one production image: MongoDB, the Python executor and the Next.js app
-# in one container, supervised by supervisord. Only port 3000 is published; the
-# executor and MongoDB stay on loopback inside the container.
+# All-in-one production image: the Python executor and the Next.js app in one
+# container, supervised by supervisord. Only port 3000 is published; the executor
+# stays on loopback inside the container. MongoDB is external (e.g. Atlas).
 #
 #   docker build -f Dockerfile.aio -t mobilerun:latest .
 #   docker run -d --name mobilerun -p 3000:3000 \
-#     -v mobilerun-data:/data/db -v mobilerun-config:/config mobilerun:latest
+#     -e MONGODB_URI='mongodb+srv://...' -v mobilerun-config:/config mobilerun:latest
 #
-# See docker/README.md for USB/adb, external MongoDB and configuration.
+# See docker/README.md for USB/adb and configuration.
 
 # ---------------------------------------------------------------- Next.js build
 FROM node:22-bookworm-slim AS web-deps
@@ -48,21 +48,11 @@ RUN --mount=type=cache,target=/root/.cache/uv \
 # ---------------------------------------------------------------------- runtime
 FROM python:3.13-slim-bookworm AS runtime
 
-ARG MONGO_MAJOR=8.0
-
-# adb for phones reached over USB or network adb; MongoDB 8 from the upstream
-# repository (Debian 12 packages exist for amd64 and arm64).
+# adb for phones reached over USB or network adb.
 RUN set -eux; \
     apt-get update; \
     apt-get install -y --no-install-recommends \
-        ca-certificates curl gnupg libstdc++6 android-tools-adb supervisor tini; \
-    curl -fsSL "https://pgp.mongodb.com/server-${MONGO_MAJOR}.asc" \
-        | gpg --dearmor -o /usr/share/keyrings/mongodb-server.gpg; \
-    echo "deb [ arch=amd64,arm64 signed-by=/usr/share/keyrings/mongodb-server.gpg ] https://repo.mongodb.org/apt/debian bookworm/mongodb-org/${MONGO_MAJOR} main" \
-        > /etc/apt/sources.list.d/mongodb-org.list; \
-    apt-get update; \
-    apt-get install -y --no-install-recommends mongodb-org-server mongodb-mongosh; \
-    apt-get purge -y --auto-remove gnupg; \
+        ca-certificates curl libstdc++6 android-tools-adb supervisor tini; \
     rm -rf /var/lib/apt/lists/*
 
 # Node runtime only: the standalone server needs the binary, not npm.
@@ -81,15 +71,14 @@ COPY --from=web-build /app/public ./public
 # Default framework config, seeded into /config on first start.
 COPY config/mobilerun.yaml /srv/defaults/config.yaml
 COPY docker/supervisord.conf /etc/supervisor/supervisord.conf
-COPY docker/entrypoint.sh docker/start-app.sh docker/fatal-exit.sh /usr/local/bin/
-RUN chmod +x /usr/local/bin/entrypoint.sh /usr/local/bin/start-app.sh /usr/local/bin/fatal-exit.sh \
-    && mkdir -p /data/db /config /etc/supervisor/conf.d /var/log/supervisor \
-    && chown -R 1000:1000 /data/db /config /var/log/supervisor /srv
+COPY docker/entrypoint.sh docker/fatal-exit.sh /usr/local/bin/
+RUN chmod +x /usr/local/bin/entrypoint.sh /usr/local/bin/fatal-exit.sh \
+    && mkdir -p /config /var/log/supervisor \
+    && chown -R 1000:1000 /config /var/log/supervisor /srv
 
 ENV NODE_ENV=production \
     PORT=3000 \
     HOSTNAME=0.0.0.0 \
-    MONGODB_URI=mongodb://127.0.0.1:27017/mobilerun \
     MONGODB_DB=mobilerun \
     EXECUTOR_URL=http://127.0.0.1:8765 \
     EXECUTOR_HOST=127.0.0.1 \
@@ -97,7 +86,7 @@ ENV NODE_ENV=production \
     MOBILERUN_CONFIG=/config/config.yaml \
     MOBILERUN_STREAM_SCREENSHOTS=1
 
-VOLUME ["/data/db", "/config"]
+VOLUME ["/config"]
 EXPOSE 3000
 
 HEALTHCHECK --interval=30s --timeout=5s --start-period=60s --retries=3 \

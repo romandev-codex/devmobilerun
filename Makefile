@@ -125,7 +125,8 @@ docker-push: docker-builder
 
 docker-run:
 	docker run --rm --name mobilerun -p 3000:3000 \
-	  -v mobilerun-data:/data/db -v mobilerun-config:/config \
+	  -v mobilerun-config:/config \
+	  -e MONGODB_URI $(if $(MONGODB_DB),-e MONGODB_DB) \
 	  $(if $(OPENROUTER_API_KEY),-e OPENROUTER_API_KEY) \
 	  $(IMAGE_REF)
 
