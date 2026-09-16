@@ -41,6 +41,18 @@ jobs:
       id-token: write
 
     steps:
+      # The hosted runner ships with ~14 GB free, which a two-arch build of this
+      # image exhausts ("No space left on device"). Drop toolchains we never use.
+      - name: Free disk space
+        run: |
+          df -h /
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /usr/local/.ghcup \
+            /opt/hostedtoolcache/CodeQL /usr/local/share/boost /usr/local/share/powershell \
+            /usr/share/swift /usr/local/julia* /opt/microsoft /opt/google /usr/lib/jvm
+          sudo docker image prune --all --force
+          sudo swapoff -a && sudo rm -f /mnt/swapfile /swapfile || true
+          df -h /
+
       - name: Checkout repository
         uses: actions/checkout@v5
 
