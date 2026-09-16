@@ -1982,7 +1982,7 @@ wheels = [
 [[package]]
 name = "mobilerun"
 version = "0.6.19"
-source = { registry = "https://pypi.org/simple" }
+source = { directory = "mobilerun" }
 dependencies = [
     { name = "aiofiles" },
     { name = "arize-phoenix" },
@@ -2006,9 +2006,55 @@ dependencies = [
     { name = "pyjwt", extra = ["crypto"] },
     { name = "rich" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/98/3d/08e6b580e95994d2edb2a95f81745a74b4e1404e4c25ca4265d215d5851b/mobilerun-0.6.19.tar.gz", hash = "sha256:32fa8206af804c2c4e8387f07be762d5379481b5f750961dcc3486385da82c48", size = 17564720, upload-time = "2026-09-10T18:10:18.311Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/2e/ae/562cedf7575d9426ba2f5325d94311ca39798e56c8bc81ee462ba5af07f6/mobilerun-0.6.19-py3-none-any.whl", hash = "sha256:a4b46bfcc568a4e9c5fb1d9d909c696b43279a233b208644a948db8107f21b75", size = 298162, upload-time = "2026-09-10T18:10:14.982Z" },
+
+[package.metadata]
+requires-dist = [
+    { name = "aiofiles", specifier = ">=25.1.0" },
+    { name = "anthropic", marker = "extra == 'anthropic'", specifier = ">=0.67.0" },
+    { name = "arize-phoenix", specifier = ">=14.4.0" },
+    { name = "async-adbutils" },
+    { name = "bandit", marker = "extra == 'dev'", specifier = ">=1.8.6" },
+    { name = "black", marker = "extra == 'dev'", specifier = "==26.5.1" },
+    { name = "filelock", specifier = ">=3.20.0" },
+    { name = "httpx", specifier = ">=0.27.0" },
+    { name = "inquirerpy", specifier = ">=0.3.4" },
+    { name = "langfuse", marker = "extra == 'langfuse'", specifier = "==4.15.1" },
+    { name = "llama-index", specifier = "==0.14.23" },
+    { name = "llama-index-callbacks-arize-phoenix", specifier = ">=0.6.1" },
+    { name = "llama-index-instrumentation", marker = "extra == 'langfuse'" },
+    { name = "llama-index-llms-anthropic", marker = "extra == 'anthropic'", specifier = ">=0.8.6,<0.9.0" },
+    { name = "llama-index-llms-google-genai", specifier = ">=0.8.5" },
+    { name = "llama-index-llms-ollama", specifier = ">=0.7.2" },
+    { name = "llama-index-llms-openai", specifier = "==0.7.10" },
+    { name = "llama-index-llms-openai-like", specifier = "==0.7.2" },
+    { name = "llama-index-llms-openrouter", specifier = ">=0.4.2" },
+    { name = "llama-index-workflows", specifier = ">=2.16.0,<3.0.0" },
+    { name = "mcp", specifier = ">=1.28.1,<2.0.0" },
+    { name = "mobilerun", extras = ["langfuse"], marker = "extra == 'dev'" },
+    { name = "mobilerun-core-local", extras = ["cloud"], specifier = ">=0.6.0" },
+    { name = "mobilerun-sdk", specifier = ">=3.2.0" },
+    { name = "mypy", marker = "extra == 'dev'", specifier = ">=1.0.0" },
+    { name = "openinference-instrumentation-llama-index", marker = "extra == 'langfuse'", specifier = ">=3.0.0" },
+    { name = "posthog", specifier = ">=6.7.6" },
+    { name = "pydantic", specifier = ">=2.11.10" },
+    { name = "pyjwt", extras = ["crypto"], specifier = ">=2.13.0" },
+    { name = "pytest", marker = "extra == 'dev'", specifier = ">=8.0.0" },
+    { name = "rich", specifier = ">=14.1.0" },
+    { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.13.0" },
+    { name = "safety", marker = "extra == 'dev'", specifier = ">=3.2.11" },
+]
+provides-extras = ["anthropic", "deepseek", "dev", "langfuse"]
+
+[package.metadata.requires-dev]
+dev = [
+    { name = "anthropic", specifier = ">=0.67.0" },
+    { name = "arize-phoenix", specifier = ">=14.4.0" },
+    { name = "bandit", specifier = ">=1.8.6" },
+    { name = "llama-index-callbacks-arize-phoenix", specifier = ">=0.6.1" },
+    { name = "llama-index-llms-anthropic", specifier = ">=0.8.6,<0.9.0" },
+    { name = "pytest", specifier = ">=8.0.0" },
+    { name = "ruff", specifier = ">=0.13.0" },
+    { name = "safety", specifier = ">=3.2.11" },
 ]
 
 [[package]]
@@ -2055,7 +2101,7 @@ requires-dist = [
     { name = "anyio", marker = "extra == 'dev'", specifier = ">=4.0.0" },
     { name = "fastapi", specifier = ">=0.115.0" },
     { name = "httpx", marker = "extra == 'dev'", specifier = ">=0.27.0" },
-    { name = "mobilerun", specifier = ">=0.6.19" },
+    { name = "mobilerun", directory = "mobilerun" },
     { name = "pydantic", specifier = ">=2.11.0" },
     { name = "pytest", marker = "extra == 'dev'", specifier = ">=8.0.0" },
     { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.13.0" },

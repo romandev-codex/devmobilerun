@@ -3,3 +3,14 @@ __pycache__
 .pytest_cache
 .ruff_cache
 tests
+
+# The vendored mobilerun checkout is built into the image, but only the part
+# hatchling needs for the wheel: its 600 MB virtualenv, tests, docs and static
+# assets stay out of the build context.
+mobilerun/**
+!mobilerun/mobilerun
+!mobilerun/mobilerun/**
+!mobilerun/pyproject.toml
+!mobilerun/README.md
+mobilerun/**/__pycache__
+mobilerun/**/*.py[cod]

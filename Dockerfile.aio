@@ -30,10 +30,20 @@ FROM python:3.13-slim-bookworm AS executor-build
 COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /bin/
 WORKDIR /srv/executor
 ENV UV_LINK_MODE=copy UV_PYTHON_DOWNLOADS=never
+# The mobilerun framework is a path dependency of api/ (see its [tool.uv.sources]),
+# so its source has to be in place before the sync. hatchling only needs the
+# package directory plus pyproject.toml and README.md to build the wheel.
+COPY api/mobilerun/pyproject.toml api/mobilerun/README.md ./mobilerun/
+COPY api/mobilerun/mobilerun ./mobilerun/mobilerun
 COPY api/pyproject.toml api/uv.lock ./
-RUN uv sync --frozen --no-dev --no-install-project
+# The cache mount keeps rebuilds cheap: editing mobilerun invalidates this layer,
+# but the third-party wheels are still unpacked from the uv cache rather than
+# re-downloaded. It is build-only state and never lands in the image.
+RUN --mount=type=cache,target=/root/.cache/uv \
+    uv sync --frozen --no-dev --no-install-project
 COPY api/executor ./executor
-RUN uv sync --frozen --no-dev
+RUN --mount=type=cache,target=/root/.cache/uv \
+    uv sync --frozen --no-dev
 
 # ---------------------------------------------------------------------- runtime
 FROM python:3.13-slim-bookworm AS runtime

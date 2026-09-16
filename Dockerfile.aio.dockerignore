@@ -23,3 +23,14 @@ docs
 tsconfig.tsbuildinfo
 Dockerfile*
 docker-compose*.yml
+
+# The vendored mobilerun checkout is built into the image, but only the part
+# hatchling needs for the wheel: its 600 MB virtualenv, tests, docs and static
+# assets stay out of the build context.
+api/mobilerun/**
+!api/mobilerun/mobilerun
+!api/mobilerun/mobilerun/**
+!api/mobilerun/pyproject.toml
+!api/mobilerun/README.md
+api/mobilerun/**/__pycache__
+api/mobilerun/**/*.py[cod]

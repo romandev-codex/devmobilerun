@@ -10,6 +10,14 @@ dependencies = [
     "mobilerun>=0.6.19",
 ]
 
+# mobilerun is built from the checkout vendored in api/mobilerun rather than
+# pulled from PyPI, so the app, the executor and the framework ship together.
+# Not editable: the built package lands in .venv, which is what the all-in-one
+# image copies into its runtime stage. `make mobilerun-local` overlays an
+# editable install on top for development.
+[tool.uv.sources]
+mobilerun = { path = "mobilerun" }
+
 [project.optional-dependencies]
 dev = [
     "pytest>=8.0.0",

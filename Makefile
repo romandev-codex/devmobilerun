@@ -38,9 +38,11 @@ IMAGE_REF := $(if $(REGISTRY),$(REGISTRY)/)$(IMAGE):$(TAG)
 PLATFORMS ?= linux/amd64,linux/arm64
 BUILDER ?= mobilerun-builder
 
-# Local mobilerun checkout (relative to api/). When present it is installed
-# editable over the PyPI release, and `uv run` skips syncing so it is not reverted.
-MOBILERUN_SRC ?= ../../../mobilerun
+# The mobilerun checkout (path is relative to api/). api/pyproject.toml already
+# depends on it by path, so `uv sync` builds it from here instead of PyPI; this
+# overlays an *editable* install so local edits apply without a reinstall, and
+# `uv run` skips syncing so it is not reverted to the built copy.
+MOBILERUN_SRC ?= mobilerun
 HAS_MOBILERUN_SRC := $(shell test -f api/$(MOBILERUN_SRC)/pyproject.toml && echo yes)
 UV_RUN := uv run$(if $(HAS_MOBILERUN_SRC), --no-sync)
 
