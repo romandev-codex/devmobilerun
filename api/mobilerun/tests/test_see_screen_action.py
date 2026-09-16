@@ -141,5 +141,56 @@ class VisionProfileMigrationTest(unittest.TestCase):
         self.assertEqual(config["llm_profiles"]["vision"]["provider"], "GoogleGenAI")
 
 
+class FakeBudgetedVisionLLM(FakeVisionLLM):
+    def __init__(self, max_tokens):
+        super().__init__()
+        self.max_tokens = max_tokens
+        self.used_max_tokens = None
+
+    def model_copy(self, update):
+        clone = FakeBudgetedVisionLLM(update["max_tokens"])
+        clone.parent = self
+        return clone
+
+    async def achat(self, messages):
+        root = getattr(self, "parent", self)
+        root.used_max_tokens = self.max_tokens
+        return await super().achat(messages)
+
+
+class SeeScreenOutputBudgetTest(unittest.TestCase):
+    def test_raises_a_small_output_budget_for_thinking_models(self):
+        llm = FakeBudgetedVisionLLM(max_tokens=256)
+
+        result = asyncio.run(see_screen(ctx=make_ctx(vision_llm=llm)))
+
+        self.assertTrue(result.success)
+        self.assertEqual(llm.used_max_tokens, 4096)
+        self.assertEqual(llm.max_tokens, 256)
+
+    def test_keeps_a_large_output_budget(self):
+        llm = FakeBudgetedVisionLLM(max_tokens=8192)
+
+        asyncio.run(see_screen(ctx=make_ctx(vision_llm=llm)))
+
+        self.assertEqual(llm.used_max_tokens, 8192)
+
+
+class WaitActionTest(unittest.TestCase):
+    def test_wait_is_capped_at_30_seconds(self):
+        from unittest.mock import AsyncMock, patch
+
+        from mobilerun.agent.utils import actions
+
+        ctx = SimpleNamespace(tools_instance=None, shared_state=None)
+        with patch.object(actions.asyncio, "sleep", new=AsyncMock()) as sleep, \
+                patch.object(actions, "_macro_pre_ui", new=AsyncMock(return_value=None)), \
+                patch.object(actions, "_macro_recorder", return_value=None):
+            result = asyncio.run(actions.wait(120, ctx=ctx))
+
+        sleep.assert_awaited_once_with(30.0)
+        self.assertIn("30.0 seconds", result.summary)
+
+
 if __name__ == "__main__":
     unittest.main()

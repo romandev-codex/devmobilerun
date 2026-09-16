@@ -588,8 +588,16 @@ async def open_bundle_id(
         )
 
 
+MAX_WAIT_SECONDS = 30.0
+
+
 async def wait(duration: float = 1.0, *, ctx: "ActionContext") -> ActionResult:
-    """Wait for a specified duration in seconds."""
+    """Wait for a specified duration in seconds (at most ``MAX_WAIT_SECONDS``)."""
+    try:
+        duration = float(duration)
+    except (TypeError, ValueError):
+        duration = 1.0
+    duration = min(max(duration, 0.0), MAX_WAIT_SECONDS)
     pre_ui = await _macro_pre_ui(ctx)
     await asyncio.sleep(duration)
     recorder = _macro_recorder(ctx)
@@ -693,6 +701,27 @@ _SEE_SCREEN_INSTRUCTIONS = (
 
 _SEE_SCREEN_DEFAULT_QUESTION = "Describe what is currently visible on the screen."
 
+# Output budget for the vision model. Providers such as OpenRouter default to
+# 256 tokens, which a thinking model spends entirely on reasoning, finishing
+# with reason "length" and an empty answer.
+_SEE_SCREEN_MIN_MAX_TOKENS = 4096
+
+
+def _with_min_output_budget(llm):
+    """Return *llm*, or a copy whose ``max_tokens`` is raised to the minimum."""
+    max_tokens = getattr(llm, "max_tokens", None)
+    if (
+        isinstance(max_tokens, bool)
+        or not isinstance(max_tokens, int)
+        or max_tokens >= _SEE_SCREEN_MIN_MAX_TOKENS
+    ):
+        return llm
+    try:
+        return llm.model_copy(update={"max_tokens": _SEE_SCREEN_MIN_MAX_TOKENS})
+    except Exception as e:
+        logger.debug(f"see_screen: could not raise vision max_tokens: {e}")
+        return llm
+
 
 async def see_screen(*, ctx: "ActionContext") -> ActionResult:
     """Look at the current screen with a vision LLM and describe what is visible."""
@@ -744,7 +773,7 @@ async def see_screen(*, ctx: "ActionContext") -> ActionResult:
 
     try:
         response = await acall_with_retries(
-            ctx.vision_llm, messages, stream=ctx.streaming
+            _with_min_output_budget(ctx.vision_llm), messages, stream=ctx.streaming
         )
     except Exception as e:
         return ActionResult(

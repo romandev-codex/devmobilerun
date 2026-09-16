@@ -245,8 +245,8 @@ async def build_tool_registry(
             "duration": {"type": "number", "required": False, "default": 1.0},
         },
         description=(
-            "Wait for a specified duration in seconds. Useful for waiting for "
-            "animations, page loads, or other time-based operations. "
+            "Wait for a specified duration in seconds (maximum 30). Useful for "
+            "waiting for animations, page loads, or other time-based operations. "
             'Usage Example: {"action": "wait", "duration": 2.0}'
         ),
     )
