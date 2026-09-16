@@ -128,7 +128,7 @@ llm_profiles:
   # Must be a vision-capable model. Remove this profile to disable see_screen.
   vision:
     provider: OpenRouter
-    model: deepseek/deepseek-v4-flash-0731
+    model: qwen/qwen3.7-flash
     temperature: 0.0
     # api_key_source: auto
     # kwargs:

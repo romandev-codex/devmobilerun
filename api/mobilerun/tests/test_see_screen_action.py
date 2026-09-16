@@ -41,34 +41,30 @@ def make_ctx(driver=None, vision_llm=None, state_provider=None):
 
 
 class SeeScreenActionTest(unittest.TestCase):
-    def test_sends_screenshot_and_question_to_vision_llm(self):
+    def test_sends_screenshot_and_default_question_to_vision_llm(self):
         llm = FakeVisionLLM()
         driver = FakeDriver()
         ctx = make_ctx(driver=driver, vision_llm=llm)
 
-        result = asyncio.run(see_screen("What is on screen?", ctx=ctx))
+        result = asyncio.run(see_screen(ctx=ctx))
 
         self.assertTrue(result.success)
         self.assertIn("A login screen", result.summary)
-        self.assertIn("What is on screen?", result.summary)
         self.assertEqual(driver.calls, 1)
 
         blocks = llm.messages[0].blocks
         self.assertIsInstance(blocks[0], TextBlock)
-        self.assertIn("What is on screen?", blocks[0].text)
+        self.assertIn("Describe what is currently visible", blocks[0].text)
         self.assertIsInstance(blocks[1], ImageBlock)
 
-    def test_missing_question_falls_back_to_general_description(self):
-        llm = FakeVisionLLM()
-        ctx = make_ctx(vision_llm=llm)
+    def test_takes_no_arguments(self):
+        ctx = make_ctx(vision_llm=FakeVisionLLM())
 
-        result = asyncio.run(see_screen(ctx=ctx))
-
-        self.assertTrue(result.success)
-        self.assertIn("Describe what is currently visible", llm.messages[0].blocks[0].text)
+        with self.assertRaises(TypeError):
+            asyncio.run(see_screen("What is on screen?", ctx=ctx))
 
     def test_fails_clearly_without_a_vision_llm(self):
-        result = asyncio.run(see_screen("anything?", ctx=make_ctx()))
+        result = asyncio.run(see_screen(ctx=make_ctx()))
 
         self.assertFalse(result.success)
         self.assertIn("vision", result.summary)
@@ -79,7 +75,7 @@ class SeeScreenActionTest(unittest.TestCase):
             vision_llm=FakeVisionLLM(),
         )
 
-        result = asyncio.run(see_screen("what now?", ctx=ctx))
+        result = asyncio.run(see_screen(ctx=ctx))
 
         self.assertFalse(result.success)
         self.assertIn("device offline", result.summary)
@@ -87,7 +83,7 @@ class SeeScreenActionTest(unittest.TestCase):
     def test_empty_vision_answer_fails(self):
         ctx = make_ctx(vision_llm=FakeVisionLLM(answer="   "))
 
-        result = asyncio.run(see_screen("what now?", ctx=ctx))
+        result = asyncio.run(see_screen(ctx=ctx))
 
         self.assertFalse(result.success)
         self.assertIn("empty answer", result.summary)
@@ -104,7 +100,7 @@ class SeeScreenActionTest(unittest.TestCase):
         self.assertIn("see_screen", standard)
         self.assertNotIn("see_screen", without_vision.tools)
         self.assertEqual(with_vision.tools["see_screen"].deps, {"screenshot"})
-        self.assertFalse(with_vision.tools["see_screen"].params["question"]["required"])
+        self.assertEqual(with_vision.tools["see_screen"].params, {})
 
 
 class VisionProfileMigrationTest(unittest.TestCase):

@@ -292,19 +292,19 @@ async def build_tool_registry(
         registry.register(
             "see_screen",
             fn=see_screen,
-            params={"question": {"type": "string", "required": False, "default": ""}},
+            params={},
             description=(
                 "Look at the current screen with a vision model and get back a "
-                "text answer. Use it when the device state you were given is "
-                "not enough: the screen shows images, icons, charts, a canvas, "
-                "or a video; text is rendered without accessibility labels; you "
-                "need to confirm what a screen actually looks like or what "
-                "changed after an action. Ask one specific question; omit it to "
-                "get a general description. This only observes, it never taps "
-                "or types, so it does not change the screen. If you were already "
-                "given a screenshot of the current screen, answer from that "
-                "instead of calling this. "
-                'Usage: {"action": "see_screen", "question": "Which payment methods are listed?"}'
+                "description of what is visible. Use it when the device state "
+                "you were given is not enough: the screen shows images, icons, "
+                "charts, a canvas, or a video; text is rendered without "
+                "accessibility labels; you need to confirm what a screen "
+                "actually looks like or what changed after an action. It takes "
+                "no arguments and always returns a general description. This "
+                "only observes, it never taps or types, so it does not change "
+                "the screen. If you were already given a screenshot of the "
+                "current screen, answer from that instead of calling this. "
+                'Usage: {"action": "see_screen"}'
             ),
             deps={"screenshot"},
         )

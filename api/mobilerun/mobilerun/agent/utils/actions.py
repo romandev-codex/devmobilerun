@@ -694,8 +694,8 @@ _SEE_SCREEN_INSTRUCTIONS = (
 _SEE_SCREEN_DEFAULT_QUESTION = "Describe what is currently visible on the screen."
 
 
-async def see_screen(question: str = "", *, ctx: "ActionContext") -> ActionResult:
-    """Look at the current screen with a vision LLM and answer a question about it."""
+async def see_screen(*, ctx: "ActionContext") -> ActionResult:
+    """Look at the current screen with a vision LLM and describe what is visible."""
     if ctx.vision_llm is None:
         return ActionResult(
             success=False,
@@ -704,8 +704,6 @@ async def see_screen(question: str = "", *, ctx: "ActionContext") -> ActionResul
                 "llm_profiles in your config to enable see_screen."
             ),
         )
-
-    asked = (question or "").strip() or _SEE_SCREEN_DEFAULT_QUESTION
 
     try:
         screenshot = await ctx.driver.screenshot()
@@ -735,7 +733,10 @@ async def see_screen(question: str = "", *, ctx: "ActionContext") -> ActionResul
         ChatMessage(
             role="user",
             blocks=[
-                TextBlock(text=f"{_SEE_SCREEN_INSTRUCTIONS}\n\nQuestion: {asked}"),
+                TextBlock(
+                    text=f"{_SEE_SCREEN_INSTRUCTIONS}\n\n"
+                    f"Question: {_SEE_SCREEN_DEFAULT_QUESTION}"
+                ),
                 ImageBlock(image=screenshot),
             ],
         )
@@ -758,4 +759,4 @@ async def see_screen(question: str = "", *, ctx: "ActionContext") -> ActionResul
             summary="Failed to look at the screen: vision model returned an empty answer.",
         )
 
-    return ActionResult(success=True, summary=f"Screen ({asked}): {answer}")
+    return ActionResult(success=True, summary=f"Screen: {answer}")

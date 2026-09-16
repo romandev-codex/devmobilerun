@@ -214,7 +214,7 @@ tools:
   stealth: false
 ```
 
-**`see_screen`:** registered only when a `vision` LLM profile is configured. It takes a screenshot and asks that model a question about the screen, so a text-only agent can inspect images, icons, or unlabeled UI. Drop the `vision` profile, or add `see_screen` to `disabled_tools`, to turn it off.
+**`see_screen`:** registered only when a `vision` LLM profile is configured. It takes a screenshot and asks that model to describe the screen, so a text-only agent can inspect images, icons, or unlabeled UI. Drop the `vision` profile, or add `see_screen` to `disabled_tools`, to turn it off.
 
 **Default behavior (`disabled_tools=None` / key omitted):** `click_at`, `click_area`, and `long_press_at` are disabled. When the active action agent has vision enabled (`fast_agent.vision=True` in direct mode, or both `manager.vision=True` and `executor.vision=True` in reasoning mode, or `vision_only=True`), `click_at` is automatically re-enabled.
 
