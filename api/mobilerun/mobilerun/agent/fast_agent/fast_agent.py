@@ -59,7 +59,7 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger("mobilerun")
 
-_MALFORMED_TOOL_CALL_LIMIT = 3
+_MALFORMED_TOOL_CALL_LIMIT = 10
 
 
 def _malformed_tool_call_correction(attempt: int) -> str:
