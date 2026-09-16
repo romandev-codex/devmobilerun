@@ -45,6 +45,30 @@ and `BUILDER` are all overridable.
 The app is on <http://localhost:3000>. Put it behind a TLS-terminating reverse
 proxy before exposing it: the app has no authentication of its own.
 
+## Publishing from CI
+
+[`.github/workflows/docker.yml`](../.github/workflows/docker.yml) builds `Dockerfile.aio`
+for `linux/amd64` and `linux/arm64` and pushes it to this repository's GitHub
+Container Registry:
+
+| Trigger                | Tags                                  |
+| ---------------------- | ------------------------------------- |
+| push to `main`         | `main`, `sha-<short>`, `latest`       |
+| push of a `v*` tag     | `1.2.3`, `1.2`, `latest`              |
+| pull request           | amd64 build only, nothing pushed      |
+| manual run             | as above, `platforms` is an input     |
+
+It needs no secrets — the built-in `GITHUB_TOKEN` pushes to `ghcr.io` — and each
+published image gets a signed build provenance attestation. Deploying then means:
+
+```bash
+docker pull ghcr.io/<owner>/<repo>:latest
+```
+
+GHCR packages start out private, so either make the package public in the
+repository's package settings or `docker login ghcr.io` on the deployment host
+with a token that has `read:packages`.
+
 ## Configuration
 
 | Variable                   | Default                                | Meaning                                                              |
