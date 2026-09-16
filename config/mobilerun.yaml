@@ -1,7 +1,7 @@
 # Mobilerun Configuration File
 # This file is auto-generated. Edit values as needed.
 
-_version: 7
+_version: 8
 
 # === Agent Settings ===
 agent:
@@ -124,6 +124,16 @@ llm_profiles:
     # kwargs:
     #   max_tokens: 2048
 
+  # Vision: Looks at the screen for the see_screen tool
+  # Must be a vision-capable model. Remove this profile to disable see_screen.
+  vision:
+    provider: OpenRouter
+    model: deepseek/deepseek-v4-flash-0731
+    temperature: 0.0
+    # api_key_source: auto
+    # kwargs:
+    #   max_tokens: 1024
+
 # === Device Settings ===
 device:
   # Default device serial (null = auto-detect)
@@ -193,6 +203,7 @@ tools:
   #   - wait           # Wait for duration
   #   - open_app       # Open apps by name
   #   - type_secret    # Type credentials (requires credentials.enabled: true)
+  #   - see_screen     # Ask a vision model what is on screen (needs the 'vision' profile)
   # Coordinate-based tools (click_at, click_area, long_press_at) are
   # disabled by default. When an action agent has vision enabled, click_at
   # is auto-unmasked. Uncomment below to provide an explicit list — your
