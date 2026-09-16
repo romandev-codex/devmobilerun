@@ -28,7 +28,19 @@ docker run -d --name mobilerun -p 3000:3000 \
   mobilerun:latest
 ```
 
-Or `docker compose -f docker-compose.prod.yml up -d --build`.
+Or `docker compose -f docker-compose.prod.yml up -d --build`, or through the Makefile:
+
+```bash
+make docker-build                          # mobilerun:latest for this host's architecture
+make docker-run                            # run it, passing OPENROUTER_API_KEY from .env
+make docker-push REGISTRY=ghcr.io/acme     # linux/amd64 + linux/arm64, built and pushed
+make docker-push REGISTRY=ghcr.io/acme TAG=v1.0.0 PLATFORMS=linux/amd64
+```
+
+`docker login ghcr.io` first. A multi-architecture image cannot be loaded into the
+local daemon, so `docker-push` builds and pushes in one step through a buildx
+builder it creates on first use (`mobilerun-builder`); `IMAGE`, `TAG`, `PLATFORMS`
+and `BUILDER` are all overridable.
 
 The app is on <http://localhost:3000>. Put it behind a TLS-terminating reverse
 proxy before exposing it: the app has no authentication of its own.

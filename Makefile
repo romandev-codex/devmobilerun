@@ -6,6 +6,9 @@
 #   make stop    stop the MongoDB started by `make mongo`
 #   make test    run both test suites
 #   make check   typecheck, lint and both test suites
+#   make docker-build   build the all-in-one production image
+#   make docker-push    build and push it (REGISTRY=ghcr.io/acme)
+#   make docker-run     run the image you just built
 #
 # `make dev` assumes MongoDB is already reachable at MONGODB_URI. Use `make mongo`
 # to start one with Docker Compose when Docker is available, otherwise with
@@ -26,16 +29,25 @@ export EXECUTOR_TOKEN
 
 HAS_DOCKER := $(shell command -v docker >/dev/null 2>&1 && docker info >/dev/null 2>&1 && echo yes)
 
+# All-in-one production image (Dockerfile.aio). REGISTRY is the namespace to push
+# to, e.g. ghcr.io/acme; without it the image is only built locally.
+IMAGE ?= mobilerun
+TAG ?= latest
+REGISTRY ?=
+IMAGE_REF := $(if $(REGISTRY),$(REGISTRY)/)$(IMAGE):$(TAG)
+PLATFORMS ?= linux/amd64,linux/arm64
+BUILDER ?= mobilerun-builder
+
 # Local mobilerun checkout (relative to api/). When present it is installed
 # editable over the PyPI release, and `uv run` skips syncing so it is not reverted.
 MOBILERUN_SRC ?= ../../../mobilerun
 HAS_MOBILERUN_SRC := $(shell test -f api/$(MOBILERUN_SRC)/pyproject.toml && echo yes)
 UV_RUN := uv run$(if $(HAS_MOBILERUN_SRC), --no-sync)
 
-.PHONY: help setup env mobilerun-local mongo mongo-stop executor app dev stop test test-app test-executor check clean
+.PHONY: help setup env mobilerun-local mongo mongo-stop executor app dev stop test test-app test-executor check clean docker-build docker-builder docker-push docker-run
 
 help:
-	@sed -n 's/^#   \(.*\)/\1/p' $(MAKEFILE_LIST) | head -6
+	@sed -n 's/^#   \(.*\)/\1/p' $(MAKEFILE_LIST) | head -9
 
 env:
 	@test -f $(ENV_FILE) || (cp .env.example $(ENV_FILE) && echo "created $(ENV_FILE); set EXECUTOR_TOKEN in it")
@@ -92,6 +104,28 @@ check:
 	npm run typecheck
 	npm run lint
 	$(MAKE) test
+
+# Single-architecture image for the host, loaded into the local Docker daemon.
+docker-build:
+	docker build -f Dockerfile.aio -t $(IMAGE_REF) .
+
+# A buildx builder that can produce both architectures.
+docker-builder:
+	@docker buildx inspect $(BUILDER) >/dev/null 2>&1 \
+	  || docker buildx create --name $(BUILDER) --driver docker-container --bootstrap
+
+# Multi-arch images cannot be loaded into the local daemon, so this builds and
+# pushes in one step. Log in first: docker login $(firstword $(subst /, ,$(REGISTRY)))
+docker-push: docker-builder
+	@test -n "$(REGISTRY)" || { echo "set REGISTRY, e.g. make docker-push REGISTRY=ghcr.io/acme"; exit 1; }
+	docker buildx build -f Dockerfile.aio --builder $(BUILDER) \
+	  --platform $(PLATFORMS) --tag $(IMAGE_REF) --push .
+
+docker-run:
+	docker run --rm --name mobilerun -p 3000:3000 \
+	  -v mobilerun-data:/data/db -v mobilerun-config:/config \
+	  $(if $(OPENROUTER_API_KEY),-e OPENROUTER_API_KEY) \
+	  $(IMAGE_REF)
 
 clean:
 	rm -rf .next node_modules/.cache
