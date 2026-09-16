@@ -158,7 +158,8 @@ export function RunTimeline({
   const [connection, setConnection] = useState<
     "connecting" | "live" | "closed"
   >(() => (isTerminal(initialRun.status) ? "closed" : "connecting"))
-  const bottomRef = useRef<HTMLDivElement>(null)
+  const listRef = useRef<HTMLDivElement>(null)
+  const stickToBottom = useRef(true)
 
   useEffect(() => {
     if (isTerminal(initialRun.status)) return
@@ -210,8 +211,11 @@ export function RunTimeline({
     return () => source.close()
   }, [initialRun.id, initialRun.status, initialEvents])
 
+  // Keep the newest event in view, unless the user scrolled up to read.
   useEffect(() => {
-    bottomRef.current?.scrollIntoView({ block: "end" })
+    const el = listRef.current
+    if (!el || !stickToBottom.current) return
+    el.scrollTop = el.scrollHeight
   }, [events.length])
 
   const shots = events.filter(
@@ -243,7 +247,15 @@ export function RunTimeline({
         </span>
       </div>
       <div className="grid gap-4 md:grid-cols-[minmax(0,1fr)_16rem]">
-        <div className="rounded-md border px-3">
+        <div
+          ref={listRef}
+          onScroll={(e) => {
+            const el = e.currentTarget
+            stickToBottom.current =
+              el.scrollHeight - el.scrollTop - el.clientHeight < 32
+          }}
+          className="max-h-[70vh] overflow-y-auto overscroll-contain rounded-md border px-3"
+        >
           {events.length === 0 ? (
             <p className="py-6 text-center text-sm text-muted-foreground">
               {run.status === "queued"
@@ -264,7 +276,6 @@ export function RunTimeline({
               />
             ))
           )}
-          <div ref={bottomRef} />
         </div>
         <RunScreen runId={run.id} shot={current} />
       </div>
