@@ -1,0 +1,25 @@
+# Build context for the all-in-one image: the Next.js app plus api/ (the
+# executor) and config/ (the default framework config).
+node_modules
+**/node_modules
+.next
+.git
+.github
+.scratch
+.venv
+**/.venv
+__pycache__
+**/__pycache__
+.pytest_cache
+**/.pytest_cache
+.ruff_cache
+**/.ruff_cache
+tests
+api/tests
+docs
+*.md
+.env
+.env.*
+tsconfig.tsbuildinfo
+Dockerfile*
+docker-compose*.yml

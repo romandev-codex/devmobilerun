@@ -59,6 +59,22 @@ only works for phones reachable over network adb (`adb connect <ip>`), because a
 USB devices. Mount your framework config directory via `MOBILERUN_CONFIG_DIR`. The Dockerfiles are provided
 but were not built on a machine without Docker; report issues you hit.
 
+## Production: one container with everything
+
+`Dockerfile.aio` builds a single image containing MongoDB, the executor and the app,
+supervised together; only port 3000 is published.
+
+```bash
+docker build -f Dockerfile.aio -t mobilerun:latest .
+docker run -d -p 3000:3000 -v mobilerun-data:/data/db -v mobilerun-config:/config \
+  -e OPENROUTER_API_KEY=... mobilerun:latest
+```
+
+Or `docker compose -f docker-compose.prod.yml up -d --build`. The framework config is
+seeded into the `/config` volume on first start, and `MONGODB_URI` pointing at an
+external server switches the built-in MongoDB off. See [docker/README.md](docker/README.md)
+for USB/adb, backups and day-to-day operation.
+
 ## Tests and checks
 
 ```bash
