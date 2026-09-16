@@ -3,8 +3,26 @@
 #
 #   MONGODB_URI='mongodb+srv://...' docker compose -f docker-compose.prod.yml up -d --build
 #
-# Phones must be reachable over network adb (`adb connect <ip>`) unless the host
-# is Linux and you pass USB devices through; see docker/README.md.
+# Phones: pick ONE of the options in the service below (see docker/README.md).
+#
+#   A. Network adb (any OS). Enable it once with the phone on USB, then connect
+#      from the container:
+#        adb tcpip 5555
+#        docker exec mobilerun adb connect <phone-ip>:5555
+#      Android 11+ can use Wireless debugging instead (`adb pair`, `adb connect`).
+#
+#   B. Host adb server (macOS, Windows, Linux). The phone stays on the host's USB
+#      and the container talks to the host's adb server over TCP. Docker Desktop
+#      on macOS/Windows cannot pass USB through, so this is the USB option there.
+#      Start the host server listening on all interfaces (exposes adb to your
+#      LAN; use a trusted network or a firewall rule):
+#        macOS/Linux:  adb kill-server && adb -a nodaemon server start
+#        Windows:      adb kill-server; adb -a nodaemon server start   (PowerShell;
+#                      allow adb.exe through Windows Firewall when prompted)
+#      Drop `nodaemon` and use `adb -a start-server` to run it in the background.
+#
+#   C. USB passthrough (Linux host only). Stop any adb server on the host first
+#      (`adb kill-server`): only one process can hold the device.
 services:
   mobilerun:
     build:
@@ -22,9 +40,20 @@ services:
       MONGODB_DB: ${MONGODB_DB:-mobilerun}
       # The provider key for the models in /config/config.yaml.
       OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:-}
+      # --- Option B: host adb server (macOS / Windows / Linux) ---------------
+      # The executor (async_adbutils) reads the first two; the `adb` CLI inside
+      # the container (`docker exec mobilerun adb devices`) reads the third.
+      # ANDROID_ADB_SERVER_HOST: host.docker.internal
+      # ANDROID_ADB_SERVER_PORT: "5037"
+      # ADB_SERVER_SOCKET: tcp:host.docker.internal:5037
     volumes:
       - config:/config
-    # USB phones on a Linux host: uncomment both lines.
+    # Option B on Linux only: Docker Desktop (macOS/Windows) already defines
+    # host.docker.internal, plain Docker Engine on Linux needs this mapping.
+    # extra_hosts:
+    #   - "host.docker.internal:host-gateway"
+
+    # --- Option C: USB passthrough (Linux host only) --------------------------
     # privileged: true
     # devices:
     #   - /dev/bus/usb:/dev/bus/usb
