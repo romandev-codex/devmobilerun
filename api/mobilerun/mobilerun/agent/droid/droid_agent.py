@@ -8,6 +8,7 @@ Architecture:
 """
 
 import asyncio
+import contextlib
 import logging
 import os
 import time
@@ -128,6 +129,20 @@ def _reap_abandoned_finalize_task(task: asyncio.Task[Any]) -> None:
         task.result()
     except (asyncio.CancelledError, Exception):
         pass
+
+
+@contextlib.asynccontextmanager
+async def _cancel_child_on_exit(handler: WorkflowHandler):
+    """Cancel a nested workflow run if the step driving it is interrupted.
+
+    A child workflow runs in its own task, so cancelling the parent run only
+    cancels the step awaiting it; without this the child keeps driving the device.
+    """
+    try:
+        yield handler
+    except asyncio.CancelledError:
+        await asyncio.shield(handler.cancel_run())
+        raise
 
 
 async def _run_finalize_stage(
@@ -918,17 +933,18 @@ class MobileAgent(Workflow):
                 input=ev.instruction,
             )
 
-            async for nested_ev in handler.stream_events():
-                self.handle_stream_event(nested_ev, ctx)
+            async with _cancel_child_on_exit(handler):
+                async for nested_ev in handler.stream_events():
+                    self.handle_stream_event(nested_ev, ctx)
 
-                if isinstance(nested_ev, FastAgentOutputEvent):
-                    if self.config.logging.save_trajectory != "none":
-                        self.trajectory_writer.write(
-                            self.trajectory,
-                            stage=f"fast_agent_step_{self.shared_state.step_number}",
-                        )
+                    if isinstance(nested_ev, FastAgentOutputEvent):
+                        if self.config.logging.save_trajectory != "none":
+                            self.trajectory_writer.write(
+                                self.trajectory,
+                                stage=f"fast_agent_step_{self.shared_state.step_number}",
+                            )
 
-            result = await handler
+                result = await handler
 
             return FastAgentResultEvent(
                 success=result.get("success", False),
@@ -1004,10 +1020,11 @@ class MobileAgent(Workflow):
         try:
             handler = self.manager_agent.run()
 
-            async for nested_ev in handler.stream_events():
-                self.handle_stream_event(nested_ev, ctx)
+            async with _cancel_child_on_exit(handler):
+                async for nested_ev in handler.stream_events():
+                    self.handle_stream_event(nested_ev, ctx)
 
-            result = await handler
+                result = await handler
         except DeviceDisconnectedError as e:
             logger.error(f"Device disconnected: {e}")
             return FinalizeEvent(success=False, reason=f"Device disconnected: {e}")
@@ -1055,10 +1072,11 @@ class MobileAgent(Workflow):
 
         handler = self.executor_agent.run(subgoal=ev.current_subgoal)
 
-        async for nested_ev in handler.stream_events():
-            self.handle_stream_event(nested_ev, ctx)
+        async with _cancel_child_on_exit(handler):
+            async for nested_ev in handler.stream_events():
+                self.handle_stream_event(nested_ev, ctx)
 
-        result = await handler
+            result = await handler
 
         # Update coordination state after execution
         self.shared_state.action_history.append(result["action"])
