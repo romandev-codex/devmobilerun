@@ -131,8 +131,13 @@ llm_profiles:
     model: qwen/qwen3.7-flash
     temperature: 0.0
     # api_key_source: auto
-    # kwargs:
-    #   max_tokens: 1024
+    kwargs:
+      # max_tokens: 1024
+      # Disable the model's thinking phase (OpenRouter request body)
+      additional_kwargs:
+        extra_body:
+          reasoning:
+            enabled: false
 
 # === Device Settings ===
 device:
