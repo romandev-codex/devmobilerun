@@ -90,8 +90,8 @@ llm_profiles:
       
   # Executor: Selects and executes atomic actions
   executor:
-    # provider: OpenRouter
-    # model: deepseek/deepseek-v4-flash-0731
+    provider: OpenRouter
+    model: deepseek/deepseek-v4-flash-0731
     temperature: 0.1
     # api_key_source: auto
     # kwargs:
@@ -99,8 +99,8 @@ llm_profiles:
       
   # Fast Agent: Direct execution agent (XML tool-calling or code generation)
   fast_agent:
-    # provider: OpenRouter
-    # model: deepseek/deepseek-v4-flash-0731
+    provider: OpenRouter
+    model: deepseek/deepseek-v4-flash-0731
     temperature: 0.2
     # api_key_source: auto
     # kwargs:
@@ -108,8 +108,8 @@ llm_profiles:
       
   # App Opener: Opens apps by name/description
   app_opener:
-    # provider: OpenRouter
-    # model: deepseek/deepseek-v4-flash-0731
+    provider: OpenRouter
+    model: deepseek/deepseek-v4-flash-0731
     temperature: 0.0
     # api_key_source: auto
     # kwargs:
@@ -117,8 +117,8 @@ llm_profiles:
 
   # Structured Output: Extracts structured data from final answers
   structured_output:
-    # provider: OpenRouter
-    # model: deepseek/deepseek-v4-flash-0731
+    provider: OpenRouter
+    model: deepseek/deepseek-v4-flash-0731
     temperature: 0.0
     # api_key_source: auto
     # kwargs:
