@@ -6,6 +6,11 @@ import { RunResultBanner } from "@/components/runs/run-summary"
 import { RunStatusBadge } from "@/components/runs/run-status-badge"
 import { StopRunButton } from "@/components/runs/stop-run-button"
 import type { RunEventView, RunView } from "@/lib/runs/service"
+import {
+  asElements,
+  countElements,
+  formatElements,
+} from "@/lib/runs/ui-elements"
 import { isTerminal } from "@/lib/run-status"
 import { cn } from "@/lib/utils"
 
@@ -78,6 +83,23 @@ const ROWS: Record<string, RowSpec> = {
         {p.pruned ? " (image pruned)" : ""}
       </span>
     ),
+  },
+  ui_state: {
+    label: "elements",
+    body: (p) => {
+      const elements = asElements(p.elements)
+      return (
+        <details className="text-xs text-muted-foreground">
+          <summary className="cursor-pointer">
+            {countElements(elements)} elements on screen at step{" "}
+            {String(p.step ?? "?")}
+          </summary>
+          <pre className={cn(mono, "max-h-72 whitespace-pre")}>
+            {formatElements(elements).join("\n")}
+          </pre>
+        </details>
+      )
+    },
   },
   result: { label: "result", body: (p) => <p>{String(p.reason ?? "")}</p> },
   error: {
@@ -209,7 +231,9 @@ export function RunTimeline({
       "plan",
       "memory",
       "screenshot",
+      "ui_state",
       "result",
+      "error",
       "cancelled",
     ]
     const handlers = types.map((t) => [t, onEvent(t)] as const)
