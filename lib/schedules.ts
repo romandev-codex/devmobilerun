@@ -3,6 +3,7 @@ import { z } from "zod"
 
 import { notFound } from "@/lib/api/errors"
 import { asObjectId as toObjectId, connectDb } from "@/lib/db"
+import { deviceCooldownUntil } from "@/lib/device-thermal"
 import { syncDevices } from "@/lib/devices"
 import { Device } from "@/lib/models/device"
 import { Run } from "@/lib/models/run"
@@ -423,6 +424,7 @@ export async function dispatchDevice(serial: string): Promise<boolean> {
   })
   if (due > 0) return false
   if (await deviceIsSpokenFor(serial)) return false
+  if (await deviceCooldownUntil(serial)) return false // too hot; try again later
 
   // Least recently run first, so the device cycles its queue; `order` decides
   // the first pass and every tie after it.
@@ -541,6 +543,14 @@ export async function executeScheduleTick(scheduleId: string): Promise<void> {
       return
     }
 
+    // The device was too hot for an earlier run (this schedule's or another's);
+    // that run already recorded the skip, so just come back when it has cooled.
+    const cooling = await deviceCooldownUntil(schedule.deviceSerial)
+    if (cooling) {
+      next = cooling
+      return
+    }
+
     let run: { id: string }
     try {
       run = await createRun({
@@ -561,7 +571,16 @@ export async function executeScheduleTick(scheduleId: string): Promise<void> {
     }
     const { executeRun } = await import("@/lib/jobs/run-task")
     await executeRun(run.id)
-    next = null // the finished run counted itself and planned the next tick
+    // A run skipped for heat did not count itself: retry once the device has
+    // cooled. Otherwise the finished run counted itself and planned the next tick.
+    const outcome = await Run.findById(run.id)
+      .select("status")
+      .lean<{ status: string }>()
+    next =
+      outcome?.status === "skipped"
+        ? ((await deviceCooldownUntil(schedule.deviceSerial)) ??
+          new Date(Date.now() + INTERVAL_RETRY_MS))
+        : null
   } catch (err) {
     console.error(`[schedule-tick] ${scheduleId} failed`, err)
   } finally {

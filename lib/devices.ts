@@ -17,6 +17,8 @@ export function toDeviceView(d: DeviceDoc): DeviceView {
     adbState: d.adbState ?? null,
     lastSeenAt: d.lastSeenAt ? d.lastSeenAt.toISOString() : null,
     activeRunId: d.activeRunId ? d.activeRunId.toString() : null,
+    lastTemperatureC: d.lastTemperatureC ?? null,
+    cooldownUntil: d.cooldownUntil ? d.cooldownUntil.toISOString() : null,
   }
 }
 
@@ -41,7 +43,12 @@ export async function syncDevices(): Promise<DeviceView[]> {
           lastSeenAt: now,
           ...(d.model ? { model: d.model } : {}),
         },
-        $setOnInsert: { displayName: null, activeRunId: null },
+        $setOnInsert: {
+          displayName: null,
+          activeRunId: null,
+          lastTemperatureC: null,
+          cooldownUntil: null,
+        },
       },
       { upsert: true }
     )

@@ -209,6 +209,7 @@ export async function finishRun(
         result: { success: boolean; reason: string; steps: number }
       }
     | { status: "failed" | "lost" | "cancelled"; error: string | null }
+    | { status: "skipped"; skipReason: string }
 ): Promise<boolean> {
   const $set: Record<string, unknown> = {
     status: outcome.status,
@@ -216,6 +217,7 @@ export async function finishRun(
   }
   if ("result" in outcome) $set.result = outcome.result
   if ("error" in outcome) $set.error = outcome.error
+  if ("skipReason" in outcome) $set.skipReason = outcome.skipReason
   // Only a run that is still in flight can finish; a later writer never overwrites a terminal status.
   const res = await Run.updateOne(
     { _id: runId, status: { $in: ["queued", "running"] } },

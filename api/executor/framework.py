@@ -7,6 +7,7 @@ protocol so tests can substitute a scripted fake at the HTTP seam.
 from __future__ import annotations
 
 import base64
+import re
 from dataclasses import dataclass, field
 from typing import Any, AsyncIterator, Protocol
 
@@ -52,6 +53,22 @@ class DeviceNotFound(Exception):
     """Raised when a serial is not in the adb device list."""
 
 
+def parse_battery_temperature(dumpsys_output: str) -> float | None:
+    """Reads the battery temperature (°C) from ``dumpsys battery`` output.
+
+    Android reports it in tenths of a degree (``temperature: 312`` is 31.2 °C).
+    Returns None when the line is missing or the value is not a usable reading;
+    emulators and some boards report 0 for a sensor they do not have.
+    """
+    match = re.search(r"^\s*temperature:\s*(-?\d+)\s*$", dumpsys_output, re.MULTILINE)
+    if not match:
+        return None
+    tenths = int(match.group(1))
+    if tenths <= 0:
+        return None
+    return tenths / 10
+
+
 class AgentRun(Protocol):
     """One execution of the agent. ``events`` yields until a terminal event."""
 
@@ -68,6 +85,8 @@ class Framework(Protocol):
     async def list_devices(self) -> list[DeviceInfo]: ...
 
     async def screenshot(self, serial: str) -> bytes: ...
+
+    async def battery_temperature(self, serial: str) -> float | None: ...
 
     async def open_url(self, serial: str, url: str) -> None: ...
 
@@ -132,6 +151,21 @@ class MobilerunFramework:
             if "not found" in message or "offline" in message or "unauthorized" in message:
                 raise DeviceNotFound(serial) from exc
             raise
+
+    async def battery_temperature(self, serial: str) -> float | None:
+        from async_adbutils import adb
+
+        from async_adbutils.errors import AdbError
+
+        try:
+            device = await adb.device(serial=serial)
+            output = await device.shell(["dumpsys", "battery"])
+        except AdbError as exc:
+            message = str(exc).lower()
+            if "not found" in message or "offline" in message or "unauthorized" in message:
+                raise DeviceNotFound(serial) from exc
+            raise
+        return parse_battery_temperature(output if isinstance(output, str) else str(output))
 
     async def open_url(self, serial: str, url: str) -> None:
         from async_adbutils import adb

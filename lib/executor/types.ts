@@ -21,6 +21,11 @@ export type ExecutorDevice = {
   model: string | null
 }
 
+/** Battery temperature in °C; null when the device reports no usable sensor. */
+export type ExecutorDeviceThermal = {
+  temperatureC: number | null
+}
+
 export type StartRunRequest = {
   runId: string
   deviceSerial: string

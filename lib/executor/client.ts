@@ -3,6 +3,7 @@ import { parseSse, type SseMessage } from "@/lib/executor/sse"
 import type {
   ExecutorConfig,
   ExecutorDevice,
+  ExecutorDeviceThermal,
   ExecutorHealth,
   StartRunRequest,
 } from "@/lib/executor/types"
@@ -105,6 +106,10 @@ export const executor = {
     if (!res.body) return
     yield* parseSse(res.body)
   },
+  deviceThermal: (serial: string) =>
+    executorJson<ExecutorDeviceThermal>(
+      `/devices/${encodeURIComponent(serial)}/thermal`
+    ),
   screenshot: async (serial: string): Promise<Uint8Array> => {
     const res = await executorFetch(
       `/devices/${encodeURIComponent(serial)}/screenshot`

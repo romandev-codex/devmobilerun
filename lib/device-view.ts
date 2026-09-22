@@ -7,6 +7,8 @@ export type DeviceView = {
   adbState: string | null
   lastSeenAt: string | null
   activeRunId: string | null
+  lastTemperatureC: number | null
+  cooldownUntil: string | null
 }
 
 export function deviceLabel(

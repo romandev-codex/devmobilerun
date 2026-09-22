@@ -33,3 +33,9 @@ class DeviceResponse(BaseModel):
     serial: str
     state: str
     model: str | None = None
+
+
+class DeviceThermalResponse(BaseModel):
+    """Battery temperature in °C, or null when the device reports no usable sensor."""
+
+    temperatureC: float | None = None

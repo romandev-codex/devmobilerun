@@ -12,6 +12,10 @@ const deviceSchema = new Schema(
     lastSeenAt: { type: Date, default: null },
     /** Device lock: the run currently executing on this device, if any. */
     activeRunId: { type: Schema.Types.ObjectId, ref: "Run", default: null },
+    /** Battery temperature (°C) read before the last run attempt; null when unknown. */
+    lastTemperatureC: { type: Number, default: null },
+    /** Set when a run was skipped because the device was too hot; no run starts before it. */
+    cooldownUntil: { type: Date, default: null },
   },
   { timestamps: true }
 )

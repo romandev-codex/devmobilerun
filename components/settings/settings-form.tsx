@@ -24,6 +24,12 @@ export function SettingsForm({ settings }: { settings: SettingsView }) {
   const [retention, setRetention] = useState(
     String(settings.screenshotRetentionRuns)
   )
+  const [maxTemp, setMaxTemp] = useState(
+    String(settings.maxDeviceTemperatureC)
+  )
+  const [cooldown, setCooldown] = useState(
+    String(settings.deviceCooldownSeconds)
+  )
   const [status, setStatus] = useState<{
     kind: "ok" | "error"
     text: string
@@ -37,6 +43,8 @@ export function SettingsForm({ settings }: { settings: SettingsView }) {
     const res = await apiJson("/api/settings", "PATCH", {
       screenshotIntervalMs: Number(intervalMs),
       screenshotRetentionRuns: Number(retention),
+      maxDeviceTemperatureC: Number(maxTemp),
+      deviceCooldownSeconds: Number(cooldown),
     })
     setSaving(false)
     if (!res.ok) return setStatus({ kind: "error", text: res.message })
@@ -47,9 +55,10 @@ export function SettingsForm({ settings }: { settings: SettingsView }) {
   return (
     <Card>
       <CardHeader>
-        <CardTitle>Screenshots</CardTitle>
+        <CardTitle>Screenshots and device health</CardTitle>
         <CardDescription>
-          How often device screens refresh and how long run images are kept.
+          How often device screens refresh, how long run images are kept, and
+          when a phone is too hot to run.
         </CardDescription>
       </CardHeader>
       <CardContent>
@@ -83,6 +92,36 @@ export function SettingsForm({ settings }: { settings: SettingsView }) {
             />
             <p className="text-xs text-muted-foreground">
               Older runs keep their text events but lose images. 0 keeps none.
+            </p>
+          </div>
+          <div className="grid gap-1.5">
+            <Label htmlFor="max-temp">Maximum battery temperature (°C)</Label>
+            <Input
+              id="max-temp"
+              type="number"
+              min={0}
+              max={100}
+              step={0.5}
+              value={maxTemp}
+              onChange={(e) => setMaxTemp(e.target.value)}
+            />
+            <p className="text-xs text-muted-foreground">
+              Read over adb before every run. A hotter device skips the run
+              instead of starting it. 0 disables the check.
+            </p>
+          </div>
+          <div className="grid gap-1.5">
+            <Label htmlFor="cooldown">Cooldown after a skip (seconds)</Label>
+            <Input
+              id="cooldown"
+              type="number"
+              min={30}
+              max={86400}
+              value={cooldown}
+              onChange={(e) => setCooldown(e.target.value)}
+            />
+            <p className="text-xs text-muted-foreground">
+              How long schedules leave a hot device alone before trying again.
             </p>
           </div>
           <div className="flex items-center gap-3">

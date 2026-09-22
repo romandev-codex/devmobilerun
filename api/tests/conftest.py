@@ -27,6 +27,8 @@ class FakeFramework:
             DeviceInfo(serial="ZY22ABCD", state="unauthorized", model=None),
         ]
         self.opened_urls: list[tuple[str, str]] = []
+        # Battery temperature per serial (°C); None means the device has no usable sensor.
+        self.temperatures: dict[str, float | None] = {"emulator-5554": 31.2}
         self.specs: list[RunSpec] = []
         # Script: list of RunEvents or floats (sleep seconds) consumed by the next run.
         self.script: list[RunEvent | float] = [
@@ -52,6 +54,11 @@ class FakeFramework:
         if not any(d.serial == serial and d.state == "device" for d in self.devices):
             raise DeviceNotFound(serial)
         return PNG_BYTES
+
+    async def battery_temperature(self, serial: str) -> float | None:
+        if not any(d.serial == serial and d.state == "device" for d in self.devices):
+            raise DeviceNotFound(serial)
+        return self.temperatures.get(serial)
 
     async def open_url(self, serial: str, url: str) -> None:
         self.opened_urls.append((serial, url))

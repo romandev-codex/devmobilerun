@@ -11,6 +11,8 @@ import {
 export type SettingsView = {
   screenshotIntervalMs: number
   screenshotRetentionRuns: number
+  maxDeviceTemperatureC: number
+  deviceCooldownSeconds: number
   prompts: Record<string, string>
 }
 
@@ -19,6 +21,8 @@ function toView(doc: SettingsDoc): SettingsView {
   return {
     screenshotIntervalMs: doc.screenshotIntervalMs,
     screenshotRetentionRuns: doc.screenshotRetentionRuns,
+    maxDeviceTemperatureC: doc.maxDeviceTemperatureC ?? 42,
+    deviceCooldownSeconds: doc.deviceCooldownSeconds ?? 300,
     prompts: Object.fromEntries(
       Object.entries(prompts).filter(
         ([, v]) => typeof v === "string" && v.trim() !== ""
@@ -43,6 +47,8 @@ export const updateSettingsSchema = z
   .object({
     screenshotIntervalMs: z.number().int().min(500).max(60_000),
     screenshotRetentionRuns: z.number().int().min(0).max(1000),
+    maxDeviceTemperatureC: z.number().min(0).max(100),
+    deviceCooldownSeconds: z.number().int().min(30).max(86_400),
     prompts: z.partialRecord(z.enum(PROMPT_ROLES), z.string().max(50_000)),
   })
   .partial()

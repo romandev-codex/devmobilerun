@@ -104,6 +104,7 @@ The user opens the app, sees every connected phone with a live-ish screenshot, c
 - `GET /config` → active LLM profiles (provider, model per agent role), read from the framework config. Read-only.
 - `GET /devices` → adb device list: `[{serial, model, state}]`.
 - `GET /devices/{serial}/screenshot` → `image/png` bytes from the driver's screenshot call. Returns 404 if the device is not listed.
+- `GET /devices/{serial}/thermal` → `{temperatureC}` from `adb shell dumpsys battery` (tenths of a degree, converted); `null` when the device reports no usable sensor. Returns 404 if the device is not listed.
 - `POST /runs` with `{runId, deviceSerial, startUrl?, instruction, options: {vision, reasoning, maxSteps}, variables: {k: v}, prompts?: {role: template}, appCards?: [...]}` → 202 `{runId}`. 409 if the device already has an active run. 404 if the device is not listed. The executor opens `startUrl` on the device through an adb VIEW intent before constructing the agent, so the URL open is deterministic and costs no agent steps.
 - `GET /runs/{runId}/events` → SSE stream. Event names: `started`, `screenshot` (base64 PNG, step index), `thought`, `action` (tool name, args, summary, success), `plan`, `log`, `memory` (`op` set/delete, `key`, `value`), `result` (`success`, `reason`, `steps`), `error` (message), `cancelled`. Stream ends after `result`, `error` or `cancelled`. If the run id is unknown, 404. A client that connects after the run started receives events from that point on; the executor does not buffer history (Next.js is the history).
 - `POST /runs/{runId}/stop` → 202; cancels the asyncio task, emits `cancelled`. 404 if unknown.
@@ -115,13 +116,13 @@ The user opens the app, sees every connected phone with a live-ish screenshot, c
 - Next.js composes one instruction string per run from the task: an optional start instruction section ("First: ..."), the goal, and an optional end section ("When the goal is done, finally: ..."). A start URL is not folded into text; it is sent as `startUrl` and opened by the executor. One agent run per task run; the three-run alternative was rejected because it triples cost and loses context between phases.
 
 ### MongoDB schema (Mongoose)
-- `devices`: `{serial (unique), displayName?, model?, state: online|offline, lastSeenAt, activeRunId?}`. Upserted from the executor's device list on every poll; `activeRunId` is the device lock, set with an atomic find-and-update where it is null.
+- `devices`: `{serial (unique), displayName?, model?, state: online|offline, lastSeenAt, activeRunId?, lastTemperatureC?, cooldownUntil?}`. Upserted from the executor's device list on every poll; `activeRunId` is the device lock, set with an atomic find-and-update where it is null.
 - `tasks`: `{name, start?: {type: url|instruction, value}, goal, end?, options: {vision, reasoning, maxSteps}, variables: [{key, value}], createdAt, updatedAt}`.
 - `schedules`: `{taskId, deviceSerial, intervalSeconds, maxRuns?: number|null, enabled, runCount, lastRunId?, nextRunAt?, agendaJobId?, createdAt, updatedAt}`.
 - `runs`: `{taskId, scheduleId?, deviceSerial, status, trigger: manual|schedule, instruction (composed), startUrl?, options, variables, startedAt?, finishedAt?, result?: {success, reason, steps}, error?, skipReason?, createdAt}`.
 - `runEvents`: `{runId, seq, type, at, payload}` where screenshot payloads hold a GridFS file id instead of bytes.
 - `screenshots.files` / `screenshots.chunks`: GridFS bucket for step images, metadata `{runId, seq}`.
-- `settings` (singleton): `{screenshotIntervalMs, screenshotRetentionRuns, prompts: {role: template}}`.
+- `settings` (singleton): `{screenshotIntervalMs, screenshotRetentionRuns, maxDeviceTemperatureC, deviceCooldownSeconds, prompts: {role: template}}`.
 - `appcards`: `{packageName (unique), name, content, createdAt, updatedAt}`; sent with every run and snapshotted on the run.
 
 ### Run state machine
@@ -134,7 +135,7 @@ queued ──▶ running ──▶ succeeded
 ```
 
 ### Agenda jobs
-- `run-task` (data `{runId}`): acquires the device lock, `POST /runs` to the executor, subscribes to the SSE stream, writes each event to `runEvents` (screenshots to GridFS), writes the final status, releases the lock, then applies screenshot retention for that task. Lock lifetime is set above the longest allowed run (derived from max steps and a per-step ceiling). If the job starts and finds its run already in `running`, it marks the run `lost` and exits without contacting the executor.
+- `run-task` (data `{runId}`): acquires the device lock, reads the battery temperature (`GET /devices/{serial}/thermal`) and, when it is above `maxDeviceTemperatureC`, finishes the run as `skipped` with the reading in `skipReason`, stores it on the device and sets `devices.cooldownUntil` (now + `deviceCooldownSeconds`) so the dispatcher and interval ticks leave the device alone until then, without charging the schedule a run; an unreadable temperature never blocks. Otherwise it `POST /runs` to the executor, subscribes to the SSE stream, writes each event to `runEvents` (screenshots to GridFS), writes the final status, releases the lock, then applies screenshot retention for that task. Lock lifetime is set above the longest allowed run (derived from max steps and a per-step ceiling). If the job starts and finds its run already in `running`, it marks the run `lost` and exits without contacting the executor.
 - `schedule-tick` (data `{scheduleId}`): if the schedule is disabled or missing, cancels itself. If the device lock is held, creates a `skipped` run with `skipReason: device busy` and reschedules. Otherwise creates a `queued` run and runs the `run-task` logic inline, then increments `runCount`; if `maxRuns` is reached, disables the schedule. The next tick is scheduled `intervalSeconds` after the run finishes (interval from end, not fixed clock).
 - Manual "Run now" creates a `queued` run and enqueues `run-task` with `now()`, so manual and scheduled runs share one code path and survive a closed tab.
 - On boot, all enabled schedules are reconciled with Agenda so they resume after a restart.

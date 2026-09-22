@@ -26,6 +26,11 @@ export default async function DevicePage({
     getSettings(),
   ])
   const history = await listRuns({ deviceSerial: device.serial, limit: 20 })
+  // Rendered on the server per request, so the clock is read once here.
+  const coolingUntil =
+    device.cooldownUntil && new Date(device.cooldownUntil) > new Date()
+      ? new Date(device.cooldownUntil)
+      : null
   return (
     <div>
       <PageHeader
@@ -62,6 +67,18 @@ export default async function DevicePage({
               {device.lastSeenAt
                 ? new Date(device.lastSeenAt).toLocaleString()
                 : "never"}
+            </dd>
+            <dt className="text-muted-foreground">Battery temperature</dt>
+            <dd>
+              {device.lastTemperatureC != null
+                ? `${device.lastTemperatureC.toFixed(1)} °C`
+                : "not read yet"}
+              {coolingUntil ? (
+                <span className="ml-2 text-destructive">
+                  too hot, cooling down until{" "}
+                  {coolingUntil.toLocaleTimeString()}
+                </span>
+              ) : null}
             </dd>
           </dl>
         </div>

@@ -4,7 +4,7 @@ from fastapi import APIRouter, Depends, HTTPException, Response
 
 from ..deps import get_framework, require_token
 from ..framework import DeviceNotFound, Framework
-from ..models import DeviceResponse
+from ..models import DeviceResponse, DeviceThermalResponse
 
 router = APIRouter(dependencies=[Depends(require_token)])
 
@@ -25,3 +25,15 @@ async def screenshot(serial: str, framework: Framework = Depends(get_framework))
             detail={"code": "device_not_found", "message": f"Device {serial} is not connected"},
         ) from None
     return Response(content=png, media_type="image/png", headers={"Cache-Control": "no-store"})
+
+
+@router.get("/devices/{serial}/thermal", response_model=DeviceThermalResponse)
+async def thermal(serial: str, framework: Framework = Depends(get_framework)) -> DeviceThermalResponse:
+    try:
+        temperature = await framework.battery_temperature(serial)
+    except DeviceNotFound:
+        raise HTTPException(
+            status_code=404,
+            detail={"code": "device_not_found", "message": f"Device {serial} is not connected"},
+        ) from None
+    return DeviceThermalResponse(temperatureC=temperature)

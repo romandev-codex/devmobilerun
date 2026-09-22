@@ -26,6 +26,8 @@ describe("settings", () => {
     expect(body.settings).toEqual({
       screenshotIntervalMs: 2000,
       screenshotRetentionRuns: 20,
+      maxDeviceTemperatureC: 42,
+      deviceCooldownSeconds: 300,
       prompts: {},
     })
   })
@@ -43,6 +45,8 @@ describe("settings", () => {
   it("rejects out-of-range and empty updates", async () => {
     expect((await patch({ screenshotIntervalMs: 100 })).status).toBe(400)
     expect((await patch({ screenshotRetentionRuns: -1 })).status).toBe(400)
+    expect((await patch({ maxDeviceTemperatureC: 101 })).status).toBe(400)
+    expect((await patch({ deviceCooldownSeconds: 5 })).status).toBe(400)
     const empty = await patch({})
     expect(empty.status).toBe(400)
     expect(empty.body.error.code).toBe("validation_error")

@@ -3,6 +3,7 @@ import { setTimeout as sleep } from "node:timers/promises"
 
 import { appCardsForRun } from "@/lib/app-cards"
 import { connectDb } from "@/lib/db"
+import { checkDeviceThermal } from "@/lib/device-thermal"
 import { executor, ExecutorError } from "@/lib/executor/client"
 import { Run } from "@/lib/models/run"
 import {
@@ -62,6 +63,15 @@ export async function executeRun(runId: string): Promise<void> {
     appCardsForRun(),
     taskMemoryMap(run.taskId),
   ])
+  const thermal = await checkDeviceThermal(run.deviceSerial, settings)
+  if (thermal.tooHot) {
+    // Nothing started, so the schedule is not charged for it. The device now
+    // carries a cooldown that keeps ticks and the dispatcher away until it
+    // has cooled; the next attempt takes a fresh reading.
+    await finishRun(run._id, { status: "skipped", skipReason: thermal.reason })
+    await releaseDeviceLock(run.deviceSerial, run._id)
+    return
+  }
   const started = await transitionRun(run._id, "queued", {
     status: "running",
     startedAt: new Date(),

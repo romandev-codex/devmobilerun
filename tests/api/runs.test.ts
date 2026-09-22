@@ -14,6 +14,11 @@ let script: SseScript = []
 let startResponses: { status: number; body: unknown }[] = []
 let startBodies: Record<string, unknown>[] = []
 let eventsStatus = 200
+/** What the fake executor answers for GET /devices/:serial/thermal. */
+let thermal: { status: number; body: unknown } = {
+  status: 200,
+  body: { temperatureC: 31.2 },
+}
 
 const json = (body: unknown) => ({
   headers: { "content-type": "application/json" },
@@ -47,6 +52,9 @@ beforeAll(async () => {
   fake.on("POST", "/runs/:id/stop", (_req, _res, { json }) =>
     json({ runId: "x" }, 202)
   )
+  fake.on("GET", "/devices/:serial/thermal", (_req, _res, { json }) =>
+    json(thermal.body, thermal.status)
+  )
 })
 
 afterAll(async () => {
@@ -57,6 +65,7 @@ afterAll(async () => {
 
 afterEach(() => {
   eventsStatus = 200
+  thermal = { status: 200, body: { temperatureC: 31.2 } }
   script = []
   startResponses = []
   startBodies = []
@@ -549,5 +558,104 @@ describe("global prompts and app cards", () => {
     expect(run.appCards).toEqual([
       { packageName: "com.example.app", name: "Ex", content: "Tap login" },
     ])
+  })
+})
+
+describe("device temperature check", () => {
+  async function saveSettings(patch: Record<string, unknown>) {
+    const { PATCH } = await import("@/app/api/settings/route")
+    await PATCH(
+      new Request("http://app/api/settings", {
+        method: "PATCH",
+        ...json(patch),
+      }),
+      {}
+    )
+  }
+
+  async function executeSuccessfully(runId: string) {
+    script = [
+      { event: "started", data: { runId } },
+      { event: "result", data: { success: true, reason: "ok", steps: 1 } },
+    ]
+    const { executeRun } = await import("@/lib/jobs/run-task")
+    await executeRun(runId)
+  }
+
+  it("skips the run and puts the device on cooldown when it is too hot", async () => {
+    await syncDevices()
+    await saveSettings({ maxDeviceTemperatureC: 42, deviceCooldownSeconds: 120 })
+    thermal = { status: 200, body: { temperatureC: 43.7 } }
+    const task = await createTask()
+    const { body } = await runNow(task.id)
+    const before = Date.now()
+    const { executeRun } = await import("@/lib/jobs/run-task")
+    await executeRun(body.run.id)
+
+    const { run, events } = await getRun(body.run.id)
+    expect(run.status).toBe("skipped")
+    expect(run.skipReason).toBe(
+      "Device too hot: 43.7 °C is above the 42 °C limit"
+    )
+    expect(run.startedAt).toBeNull()
+    expect(run.finishedAt).toBeTruthy()
+    expect(events).toEqual([])
+    expect(startBodies).toHaveLength(0) // the executor was never asked to start
+
+    const d = (await device())!
+    expect(d.activeRunId).toBeNull()
+    expect(d.lastTemperatureC).toBe(43.7)
+    const until = d.cooldownUntil!.getTime()
+    expect(until).toBeGreaterThanOrEqual(before + 120_000)
+    expect(until).toBeLessThan(before + 130_000)
+  })
+
+  it("starts the run and clears the cooldown when the reading is under the limit", async () => {
+    await syncDevices()
+    const { Device } = await import("@/lib/models/device")
+    await Device.updateOne(
+      { serial: "emulator-5554" },
+      { $set: { cooldownUntil: new Date(Date.now() + 60_000) } }
+    )
+    thermal = { status: 200, body: { temperatureC: 35 } }
+    const task = await createTask()
+    const { body } = await runNow(task.id)
+    await executeSuccessfully(body.run.id)
+
+    expect((await getRun(body.run.id)).run.status).toBe("succeeded")
+    const d = (await device())!
+    expect(d.lastTemperatureC).toBe(35)
+    expect(d.cooldownUntil).toBeNull()
+  })
+
+  it("never blocks on a missing sensor or an executor without the endpoint", async () => {
+    await syncDevices()
+    const task = await createTask()
+
+    thermal = { status: 200, body: { temperatureC: null } }
+    const a = await runNow(task.id)
+    await executeSuccessfully(a.body.run.id)
+    expect((await getRun(a.body.run.id)).run.status).toBe("succeeded")
+
+    thermal = {
+      status: 404,
+      body: { error: { code: "not_found", message: "no route" } },
+    }
+    const b = await runNow(task.id)
+    await executeSuccessfully(b.body.run.id)
+    expect((await getRun(b.body.run.id)).run.status).toBe("succeeded")
+  })
+
+  it("does not read the temperature when the limit is 0", async () => {
+    await syncDevices()
+    await saveSettings({ maxDeviceTemperatureC: 0 })
+    thermal = { status: 200, body: { temperatureC: 80 } }
+    const task = await createTask()
+    const { body } = await runNow(task.id)
+    fake.calls.length = 0
+    await executeSuccessfully(body.run.id)
+
+    expect((await getRun(body.run.id)).run.status).toBe("succeeded")
+    expect(fake.calls.some((c) => c.path.endsWith("/thermal"))).toBe(false)
   })
 })
