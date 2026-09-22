@@ -6,7 +6,12 @@ import { asObjectId as toObjectId, connectDb } from "@/lib/db"
 import { syncDevices } from "@/lib/devices"
 import { Device } from "@/lib/models/device"
 import { Run } from "@/lib/models/run"
-import { Schedule, type ScheduleDoc } from "@/lib/models/schedule"
+import {
+  Schedule,
+  SCHEDULE_MODES,
+  type ScheduleDoc,
+  type ScheduleMode,
+} from "@/lib/models/schedule"
 import { Task } from "@/lib/models/task"
 import { createRun, createSkippedRun } from "@/lib/runs/service"
 
@@ -15,12 +20,20 @@ const asObjectId = (id: string, what = "Schedule") => toObjectId(id, what)
 export const SCHEDULE_TICK_JOB = "schedule-tick"
 export type ScheduleTickData = { scheduleId: string }
 
+export const DEVICE_DISPATCH_JOB = "device-dispatch"
+/** How often idle devices are offered their next queued schedule. */
+export const DEVICE_DISPATCH_EVERY = "5 seconds"
+/** How long a tick blocked by a queue run waits before trying for the device again. */
+const INTERVAL_RETRY_MS = 10_000
+
 export type ScheduleView = {
   id: string
   taskId: string
   taskName: string
   deviceSerial: string
-  intervalSeconds: number
+  mode: ScheduleMode
+  intervalSeconds: number | null
+  order: number | null
   maxRuns: number | null
   maxFails: number | null
   enabled: boolean
@@ -34,33 +47,81 @@ export type ScheduleView = {
   updatedAt: string
 }
 
-export const createScheduleSchema = z.object({
-  taskId: z.string().min(1),
-  deviceSerial: z.string().trim().min(1),
-  intervalSeconds: z
-    .number()
-    .int()
-    .min(1)
-    .max(30 * 24 * 3600),
-  maxRuns: z.number().int().min(1).max(1_000_000).nullable().default(null),
-  maxFails: z.number().int().min(1).max(1_000_000).nullable().default(null),
-  enabled: z.boolean().default(true),
-})
+const intervalSecondsField = z
+  .number()
+  .int()
+  .min(1)
+  .max(30 * 24 * 3600)
+const orderField = z.number().int().min(0).max(1_000_000)
+const budgetField = z.number().int().min(1).max(1_000_000)
+
+type ModeShape = {
+  mode: ScheduleMode
+  intervalSeconds: number | null
+  order: number | null
+}
+
+/** Each mode needs its own trigger field and has no use for the other one. */
+function checkShape(shape: ModeShape, ctx: z.RefinementCtx) {
+  if (shape.mode === "interval" && shape.intervalSeconds == null)
+    ctx.addIssue({
+      code: "custom",
+      message: "intervalSeconds is required in interval mode",
+      path: ["intervalSeconds"],
+    })
+  if (shape.mode === "queue" && shape.order == null)
+    ctx.addIssue({
+      code: "custom",
+      message: "order is required in queue mode",
+      path: ["order"],
+    })
+}
+
+/** Drops the field the chosen mode does not use, so no stale trigger survives. */
+function normalizeShape<T extends ModeShape>(shape: T): T {
+  return {
+    ...shape,
+    intervalSeconds: shape.mode === "interval" ? shape.intervalSeconds : null,
+    order: shape.mode === "queue" ? shape.order : null,
+  }
+}
+
+export const createScheduleSchema = z
+  .object({
+    taskId: z.string().min(1),
+    deviceSerial: z.string().trim().min(1),
+    mode: z.enum(SCHEDULE_MODES).default("interval"),
+    intervalSeconds: intervalSecondsField.nullable().default(null),
+    order: orderField.nullable().default(null),
+    maxRuns: budgetField.nullable().default(null),
+    maxFails: budgetField.nullable().default(null),
+    enabled: z.boolean().default(true),
+  })
+  .superRefine(checkShape)
+  .transform(normalizeShape)
 
 export const updateScheduleSchema = z
   .object({
     deviceSerial: z.string().trim().min(1),
-    intervalSeconds: z
-      .number()
-      .int()
-      .min(1)
-      .max(30 * 24 * 3600),
-    maxRuns: z.number().int().min(1).max(1_000_000).nullable(),
-    maxFails: z.number().int().min(1).max(1_000_000).nullable(),
+    mode: z.enum(SCHEDULE_MODES),
+    intervalSeconds: intervalSecondsField.nullable(),
+    order: orderField.nullable(),
+    maxRuns: budgetField.nullable(),
+    maxFails: budgetField.nullable(),
     enabled: z.boolean(),
   })
   .partial()
   .refine((v) => Object.keys(v).length > 0, { message: "No fields provided" })
+
+/** A patch is checked against the document it produces, not on its own. */
+const scheduleShapeSchema = z
+  .object({
+    mode: z.enum(SCHEDULE_MODES),
+    intervalSeconds: intervalSecondsField.nullable(),
+    order: orderField.nullable(),
+  })
+  .superRefine(checkShape)
+  .transform(normalizeShape)
 
 type Related = {
   taskNames: Map<string, string>
@@ -91,7 +152,9 @@ function toView(doc: ScheduleDoc, related: Related): ScheduleView {
     taskId: doc.taskId.toString(),
     taskName: related.taskNames.get(doc.taskId.toString()) ?? "(deleted task)",
     deviceSerial: doc.deviceSerial,
-    intervalSeconds: doc.intervalSeconds,
+    mode: doc.mode ?? "interval",
+    intervalSeconds: doc.intervalSeconds ?? null,
+    order: doc.order ?? null,
     maxRuns: doc.maxRuns ?? null,
     maxFails: doc.maxFails ?? null,
     enabled: doc.enabled,
@@ -113,9 +176,8 @@ function nextTickFor(
   s: Pick<ScheduleDoc, "lastRunAt" | "createdAt" | "intervalSeconds">
 ): Date {
   const base = s.lastRunAt ?? s.createdAt
-  return new Date(
-    Math.max(Date.now(), base.getTime() + s.intervalSeconds * 1000)
-  )
+  const seconds = s.intervalSeconds ?? 0
+  return new Date(Math.max(Date.now(), base.getTime() + seconds * 1000))
 }
 
 /** A schedule that has used up its run budget must not be planned again. */
@@ -130,6 +192,11 @@ export function isFailing(
   s: Pick<ScheduleDoc, "maxFails" | "failStreak">
 ): boolean {
   return s.maxFails != null && (s.failStreak ?? 0) >= s.maxFails
+}
+
+/** Enabled and still within both of its budgets. */
+function isRunnable(s: ScheduleDoc): boolean {
+  return s.enabled && !isExhausted(s) && !isFailing(s)
 }
 
 // ── Agenda planning ─────────────────────────────────────────────────────
@@ -178,6 +245,19 @@ export async function pendingTickCount(
   return jobs.length
 }
 
+/**
+ * Safety net for the inline tick path: the run's own bookkeeping plans the next
+ * tick, so this only steps in when that did not happen.
+ */
+async function ensureIntervalTick(
+  scheduleId: mongoose.Types.ObjectId
+): Promise<void> {
+  const s = await Schedule.findById(scheduleId).lean<ScheduleDoc>()
+  if (!s || s.mode !== "interval" || !isRunnable(s)) return
+  if ((await pendingTickCount(scheduleId)) > 0) return
+  await planNextTick(scheduleId, nextTickFor(s))
+}
+
 async function disableSchedule(
   scheduleId: mongoose.Types.ObjectId
 ): Promise<void> {
@@ -222,7 +302,9 @@ export async function createSchedule(input: unknown): Promise<ScheduleView> {
     .lean()
   if (!device) throw notFound("Device")
   const doc = await Schedule.create({ ...data, taskId: task._id })
-  if (doc.enabled) await planNextTick(doc._id, new Date())
+  // A queue schedule waits for its device instead of for a time.
+  if (doc.enabled && doc.mode === "interval")
+    await planNextTick(doc._id, new Date())
   return getSchedule(doc._id.toString())
 }
 
@@ -241,12 +323,19 @@ export async function updateSchedule(
       .lean()
     if (!device) throw notFound("Device")
   }
+  // A patch may only touch one half of the trigger, so check what it produces.
+  const shape = scheduleShapeSchema.parse({
+    mode: patch.mode ?? before.mode,
+    intervalSeconds:
+      patch.intervalSeconds !== undefined
+        ? patch.intervalSeconds
+        : (before.intervalSeconds ?? null),
+    order: patch.order !== undefined ? patch.order : (before.order ?? null),
+  })
   // Turning a schedule back on forgives its failures; without this it would be
   // disabled again at once, and only raising maxFails could revive it.
-  const set: Record<string, unknown> =
-    patch.enabled === true && !before.enabled
-      ? { ...patch, failStreak: 0 }
-      : { ...patch }
+  const set: Record<string, unknown> = { ...patch, ...shape }
+  if (patch.enabled === true && !before.enabled) set.failStreak = 0
   const after = await Schedule.findByIdAndUpdate(
     oid,
     { $set: set },
@@ -254,11 +343,13 @@ export async function updateSchedule(
   ).lean<ScheduleDoc>()
   if (!after) throw notFound("Schedule")
 
-  if (!after.enabled) {
+  if (!after.enabled || isExhausted(after) || isFailing(after)) {
     await disableSchedule(oid)
-  } else if (isExhausted(after) || isFailing(after)) {
-    await disableSchedule(oid)
-  } else if (!before.enabled) {
+  } else if (after.mode !== "interval") {
+    // Nothing to plan; drop any tick left over from interval mode.
+    await cancelPendingTicks(oid)
+    await Schedule.updateOne({ _id: oid }, { $set: { nextRunAt: null } })
+  } else if (!before.enabled || before.mode !== "interval") {
     await planNextTick(oid, new Date())
   } else if (
     patch.intervalSeconds !== undefined ||
@@ -266,8 +357,7 @@ export async function updateSchedule(
     patch.maxRuns !== undefined ||
     patch.maxFails !== undefined
   ) {
-    const when = nextTickFor(after)
-    await planNextTick(oid, when)
+    await planNextTick(oid, nextTickFor(after))
   }
   return getSchedule(id)
 }
@@ -308,12 +398,99 @@ export async function runScheduleNow(id: string): Promise<{ runId: string }> {
   return { runId: run.id }
 }
 
+// ── device dispatch (queue mode) ────────────────────────────────────────
+
+/** True while a run already holds this device, or is about to. */
+async function deviceIsSpokenFor(serial: string): Promise<boolean> {
+  const pending = await Run.countDocuments({
+    deviceSerial: serial,
+    status: { $in: ["queued", "running"] },
+  })
+  return pending > 0
+}
+
+/**
+ * Starts the next queue schedule on one idle device. A device with an interval
+ * schedule already due is left alone: that tick is about to claim it, and a due
+ * timer outranks the rotation.
+ */
+export async function dispatchDevice(serial: string): Promise<boolean> {
+  const due = await Schedule.countDocuments({
+    deviceSerial: serial,
+    mode: "interval",
+    enabled: true,
+    nextRunAt: { $ne: null, $lte: new Date() },
+  })
+  if (due > 0) return false
+  if (await deviceIsSpokenFor(serial)) return false
+
+  // Least recently run first, so the device cycles its queue; `order` decides
+  // the first pass and every tie after it.
+  const queued = await Schedule.find({
+    deviceSerial: serial,
+    mode: "queue",
+    enabled: true,
+  })
+    .sort({ lastRunAt: 1, order: 1 })
+    .lean<ScheduleDoc[]>()
+  const next = queued.find(isRunnable)
+  if (!next) return false
+
+  const task = await Task.findById(next.taskId).select("_id").lean()
+  if (!task) {
+    await disableSchedule(next._id)
+    return false
+  }
+  try {
+    const run = await createRun({
+      taskId: next.taskId.toString(),
+      deviceSerial: serial,
+      trigger: "schedule",
+      scheduleId: next._id.toString(),
+    })
+    const { enqueueRun } = await import("@/lib/jobs/agenda")
+    await enqueueRun(run.id)
+    return true
+  } catch (err) {
+    // Lost the device to someone else between the checks above and now.
+    console.error(`[dispatch] ${serial} could not start a queued schedule`, err)
+    return false
+  }
+}
+
+/**
+ * Offers every idle, online device its next queue schedule. Polled rather than
+ * driven by events so that a missed wake-up costs one cycle, not a stuck device.
+ */
+export async function dispatchDevices(): Promise<number> {
+  await connectDb()
+  try {
+    // Queue schedules own no tick, so this poll is what keeps device state
+    // fresh; without it a phone coming back online would go unnoticed.
+    await syncDevices()
+  } catch {
+    return 0 // executor unreachable: nothing could start anyway
+  }
+  const devices = await Device.find({ online: true, activeRunId: null })
+    .select("serial")
+    .lean<{ serial: string }[]>()
+  let started = 0
+  for (const d of devices) {
+    try {
+      if (await dispatchDevice(d.serial)) started++
+    } catch (err) {
+      console.error(`[dispatch] ${d.serial} failed`, err)
+    }
+  }
+  return started
+}
+
 // ── tick ────────────────────────────────────────────────────────────────
 
 /**
- * One scheduled firing. Skips (and records) when the device is unavailable,
- * otherwise runs the task inline and plans the next tick `intervalSeconds`
- * after this one finished. Disables the schedule when `maxRuns` is reached or
+ * One firing of an interval schedule. Skips (and records) when the device is
+ * unavailable, otherwise runs the task inline; the run's own bookkeeping counts
+ * it and plans the next tick. Disables the schedule when `maxRuns` is reached or
  * it has failed `maxFails` times in a row.
  */
 export async function executeScheduleTick(scheduleId: string): Promise<void> {
@@ -322,6 +499,7 @@ export async function executeScheduleTick(scheduleId: string): Promise<void> {
   const oid = new mongoose.Types.ObjectId(scheduleId)
   const schedule = await Schedule.findById(oid).lean<ScheduleDoc>()
   if (!schedule || !schedule.enabled) return
+  if ((schedule.mode ?? "interval") !== "interval") return
 
   const task = await Task.findById(schedule.taskId).select("_id").lean()
   if (!task) {
@@ -329,7 +507,9 @@ export async function executeScheduleTick(scheduleId: string): Promise<void> {
     return
   }
 
-  let next: Date | null = new Date(Date.now() + schedule.intervalSeconds * 1000)
+  let next: Date | null = new Date(
+    Date.now() + (schedule.intervalSeconds ?? 0) * 1000
+  )
   try {
     let unavailable: string | null = null
     try {
@@ -346,6 +526,12 @@ export async function executeScheduleTick(scheduleId: string): Promise<void> {
     }
 
     if (unavailable) {
+      // A queue run holds the device: wait for the slot it is about to free
+      // rather than losing a whole interval to a skip.
+      if (await blockedByQueueRun(schedule.deviceSerial)) {
+        next = new Date(Date.now() + INTERVAL_RETRY_MS)
+        return
+      }
       await createSkippedRun({
         taskId: schedule.taskId.toString(),
         deviceSerial: schedule.deviceSerial,
@@ -375,19 +561,30 @@ export async function executeScheduleTick(scheduleId: string): Promise<void> {
     }
     const { executeRun } = await import("@/lib/jobs/run-task")
     await executeRun(run.id)
-    next = await recordScheduledRun(oid, new mongoose.Types.ObjectId(run.id))
+    next = null // the finished run counted itself and planned the next tick
   } catch (err) {
     console.error(`[schedule-tick] ${scheduleId} failed`, err)
   } finally {
-    if (next) {
-      await planNextTick(oid, next).catch((err: unknown) =>
-        console.error(
-          `[schedule-tick] ${scheduleId} could not plan next tick`,
-          err
-        )
+    const plan = next ? planNextTick(oid, next) : ensureIntervalTick(oid)
+    await plan.catch((err: unknown) =>
+      console.error(
+        `[schedule-tick] ${scheduleId} could not plan next tick`,
+        err
       )
-    }
+    )
   }
+}
+
+/** Whether the run occupying a device belongs to a queue schedule. */
+async function blockedByQueueRun(serial: string): Promise<boolean> {
+  const active = await Run.findOne({ deviceSerial: serial, status: "running" })
+    .select("scheduleId")
+    .lean<{ scheduleId?: mongoose.Types.ObjectId | null }>()
+  if (!active?.scheduleId) return false
+  const s = await Schedule.findById(active.scheduleId)
+    .select("mode")
+    .lean<{ mode: ScheduleMode }>()
+  return s?.mode === "queue"
 }
 
 /**
@@ -434,6 +631,9 @@ async function recordScheduledRun(
     await disableSchedule(scheduleId)
     return null
   }
+  // A queue schedule has no next time, only a next turn; dispatch finds it.
+  if (updated.mode !== "interval" || updated.intervalSeconds == null)
+    return null
   return new Date(finishedAt.getTime() + updated.intervalSeconds * 1000)
 }
 
@@ -457,9 +657,18 @@ export async function afterScheduledRunFinished(
   if (next) await planNextTick(schedule._id, next)
 }
 
-/** Ensures every enabled schedule has a pending tick; called at server start. */
+/**
+ * Ensures every enabled interval schedule has a pending tick, and retires
+ * schedules of either mode that are over budget. Called at server start.
+ */
 export async function reconcileSchedules(): Promise<number> {
   await connectDb()
+  // Schedules predating queue mode carry no `mode`, and lean reads do not apply
+  // the schema default, so settle it in the documents themselves.
+  await Schedule.updateMany(
+    { mode: { $exists: false } },
+    { $set: { mode: "interval" } }
+  )
   const enabled = await Schedule.find({ enabled: true }).lean<ScheduleDoc[]>()
   let planned = 0
   const resuming = new Set(
@@ -470,10 +679,12 @@ export async function reconcileSchedules(): Promise<number> {
     ).map((r) => r.scheduleId.toString())
   )
   for (const s of enabled) {
-    if (isExhausted(s) || isFailing(s)) {
+    if (!isRunnable(s)) {
       await disableSchedule(s._id)
       continue
     }
+    // Queue schedules own no job: the dispatch poll picks them up.
+    if (s.mode !== "interval") continue
     // A run of this schedule is being resumed; it plans the next tick when it finishes.
     if (resuming.has(s._id.toString())) continue
     if ((await pendingTickCount(s._id)) === 0) {

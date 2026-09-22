@@ -23,6 +23,12 @@ export function formatInterval(seconds: number): string {
   return `${seconds} s`
 }
 
+/** What triggers the schedule: a timer, or its place in the device's rotation. */
+export function formatTrigger(s: ScheduleView): string {
+  if (s.mode === "queue") return `Queue #${s.order ?? 0}`
+  return s.intervalSeconds ? formatInterval(s.intervalSeconds) : "—"
+}
+
 export function ScheduleTable({
   schedules,
   tasks,
@@ -45,7 +51,7 @@ export function ScheduleTable({
         <TableRow>
           {showTask ? <TableHead>Task</TableHead> : null}
           <TableHead>Device</TableHead>
-          <TableHead>Every</TableHead>
+          <TableHead>Trigger</TableHead>
           <TableHead>Runs</TableHead>
           <TableHead>Fails</TableHead>
           <TableHead>Last run</TableHead>
@@ -74,7 +80,7 @@ export function ScheduleTable({
                 {deviceLabel[s.deviceSerial] ?? s.deviceSerial}
               </Link>
             </TableCell>
-            <TableCell>{formatInterval(s.intervalSeconds)}</TableCell>
+            <TableCell>{formatTrigger(s)}</TableCell>
             <TableCell>
               {s.maxRuns
                 ? `${s.runCount} of ${s.maxRuns}`
@@ -101,12 +107,16 @@ export function ScheduleTable({
               )}
             </TableCell>
             <TableCell className="text-xs">
-              {s.enabled && s.nextRunAt ? (
+              {!s.enabled ? (
+                <Badge variant="outline">disabled</Badge>
+              ) : s.mode === "queue" ? (
+                <span className="text-muted-foreground">
+                  when device is free
+                </span>
+              ) : s.nextRunAt ? (
                 new Date(s.nextRunAt).toLocaleString()
               ) : (
-                <Badge variant="outline">
-                  {s.enabled ? "pending" : "disabled"}
-                </Badge>
+                <Badge variant="outline">pending</Badge>
               )}
             </TableCell>
             <TableCell>

@@ -9,7 +9,12 @@ import {
 } from "../helpers/fake-executor"
 
 let fake: FakeExecutor
-let devices = [{ serial: "A", state: "device", model: "a" }]
+const ONLINE = ["A", "Q", "R", "S", "T", "U"].map((serial) => ({
+  serial,
+  state: "device",
+  model: serial.toLowerCase(),
+}))
+let devices = [...ONLINE]
 
 beforeAll(async () => {
   fake = await startFakeExecutor()
@@ -95,6 +100,30 @@ async function tick(id: string) {
   await executeScheduleTick(id)
 }
 
+/** Executes what dispatch enqueued; Agenda itself is not running in tests. */
+async function drain(serial: string) {
+  const { Run } = await import("@/lib/models/run")
+  const { executeRun } = await import("@/lib/jobs/run-task")
+  const queued = await Run.find({ deviceSerial: serial, status: "queued" })
+    .select("_id")
+    .lean<{ _id: mongoose.Types.ObjectId }[]>()
+  for (const r of queued) await executeRun(r._id.toString())
+  return queued.length
+}
+
+/** One dispatch poll for a device, plus the run it started. */
+async function cycle(serial: string) {
+  const { dispatchDevice } = await import("@/lib/schedules")
+  const started = await dispatchDevice(serial)
+  await drain(serial)
+  return started
+}
+
+/** Keeps a finished test's schedules out of later rotations. */
+async function stop(...ids: string[]) {
+  for (const id of ids) await patch(id, { enabled: false })
+}
+
 async function runsFor(scheduleId: string) {
   const { Run } = await import("@/lib/models/run")
   return Run.find({ scheduleId: new mongoose.Types.ObjectId(scheduleId) })
@@ -115,6 +144,8 @@ describe("schedules", () => {
       taskName: "T",
       deviceSerial: "A",
       intervalSeconds: 60,
+      mode: "interval",
+      order: null,
       maxRuns: null,
       maxFails: null,
       enabled: true,
@@ -184,7 +215,7 @@ describe("schedules", () => {
 
     devices = []
     await tick(id)
-    devices = [{ serial: "A", state: "device", model: "a" }]
+    devices = [...ONLINE]
 
     const runs = await runsFor(id)
     expect(runs.map((r) => [r.status, r.skipReason])).toEqual([
@@ -263,7 +294,7 @@ describe("schedules", () => {
 
     devices = []
     await tick(id)
-    devices = [{ serial: "A", state: "device", model: "a" }]
+    devices = [...ONLINE]
     expect(await get(id)).toMatchObject({ failStreak: 1, enabled: true })
 
     // Had the skip counted, this second real failure would be the third.
@@ -446,6 +477,222 @@ describe("schedules", () => {
     expect(lowered.body.schedule.enabled).toBe(false)
     expect(await pendingTicks(id)).toBe(0)
     expect(await runsFor(id)).toHaveLength(1)
+  })
+
+  it("a schedule predating queue mode keeps running as an interval one", async () => {
+    const t = await task("legacy")
+    const { body } = await create({
+      taskId: t,
+      deviceSerial: "A",
+      intervalSeconds: 60,
+    })
+    const id = body.schedule.id as string
+    // Strip the field the way a document written before this feature looks.
+    await mongoose.connection
+      .db!.collection("schedules")
+      .updateOne(
+        { _id: new mongoose.Types.ObjectId(id) },
+        { $unset: { mode: "" } }
+      )
+    expect((await get(id)).mode).toBe("interval")
+
+    await tick(id)
+    expect((await get(id)).runCount).toBe(1)
+
+    const { reconcileSchedules } = await import("@/lib/schedules")
+    await reconcileSchedules()
+    const raw = await mongoose.connection
+      .db!.collection("schedules")
+      .findOne({ _id: new mongoose.Types.ObjectId(id) })
+    expect(raw!.mode).toBe("interval")
+    await stop(id)
+  })
+
+  it("a queue schedule owns no tick and waits for its device", async () => {
+    const t = await task("qsolo")
+    const { status, body } = await create({
+      taskId: t,
+      deviceSerial: "Q",
+      mode: "queue",
+      order: 1,
+    })
+    expect(status).toBe(201)
+    const id = body.schedule.id as string
+    expect(body.schedule).toMatchObject({
+      mode: "queue",
+      order: 1,
+      intervalSeconds: null,
+      nextRunAt: null,
+    })
+    expect(await pendingTicks(id)).toBe(0)
+
+    expect(await cycle("Q")).toBe(true)
+    const s = await get(id)
+    expect(s).toMatchObject({ runCount: 1, enabled: true, nextRunAt: null })
+    expect((await runsFor(id))[0]).toMatchObject({
+      status: "succeeded",
+      trigger: "schedule",
+    })
+    expect(await pendingTicks(id)).toBe(0)
+    await stop(id)
+  })
+
+  it("a device works through its queue in order, then keeps cycling", async () => {
+    const [one, two] = [await task("qa"), await task("qb")]
+    const a = (
+      await create({ taskId: one, deviceSerial: "Q", mode: "queue", order: 2 })
+    ).body.schedule.id as string
+    const b = (
+      await create({ taskId: two, deviceSerial: "Q", mode: "queue", order: 1 })
+    ).body.schedule.id as string
+
+    // First pass follows order, not creation time.
+    await cycle("Q")
+    expect((await get(b)).runCount).toBe(1)
+    expect((await get(a)).runCount).toBe(0)
+
+    await cycle("Q")
+    expect((await get(a)).runCount).toBe(1)
+
+    // Least recently run goes next, so the device rotates.
+    await cycle("Q")
+    await cycle("Q")
+    expect((await get(a)).runCount).toBe(2)
+    expect((await get(b)).runCount).toBe(2)
+    await stop(a, b)
+  })
+
+  it("a due interval schedule takes the freed device before the queue", async () => {
+    const [qt, it2] = [await task("prio-q"), await task("prio-i")]
+    const q = (
+      await create({ taskId: qt, deviceSerial: "R", mode: "queue", order: 1 })
+    ).body.schedule.id as string
+    const i = (
+      await create({ taskId: it2, deviceSerial: "R", intervalSeconds: 3600 })
+    ).body.schedule.id as string
+
+    // The interval schedule is due from creation, so the queue stands down.
+    expect(await cycle("R")).toBe(false)
+    expect((await get(q)).runCount).toBe(0)
+
+    await tick(i)
+    expect((await get(i)).runCount).toBe(1)
+
+    // Its next tick is an hour out, so the device is the queue's again.
+    expect(await cycle("R")).toBe(true)
+    expect((await get(q)).runCount).toBe(1)
+    await stop(q, i)
+  })
+
+  it("an interval tick blocked by a queue run waits for the next slot instead of skipping", async () => {
+    const [qt, it2] = [await task("defer-q"), await task("defer-i")]
+    const q = (
+      await create({ taskId: qt, deviceSerial: "U", mode: "queue", order: 1 })
+    ).body.schedule.id as string
+    const i = (
+      await create({ taskId: it2, deviceSerial: "U", intervalSeconds: 600 })
+    ).body.schedule.id as string
+    await patch(i, { enabled: false }) // keep it out of the way while we set up
+
+    const { dispatchDevice } = await import("@/lib/schedules")
+    expect(await dispatchDevice("U")).toBe(true)
+    const { Run } = await import("@/lib/models/run")
+    const run = await Run.findOne({ deviceSerial: "U", status: "queued" })
+    const { acquireDeviceLock, finishRun, releaseDeviceLock } =
+      await import("@/lib/runs/service")
+    await Run.updateOne(
+      { _id: run!._id },
+      { $set: { status: "running", startedAt: new Date() } }
+    )
+    await acquireDeviceLock("U", run!._id)
+
+    await patch(i, { enabled: true })
+    const before = Date.now()
+    await tick(i)
+
+    // No skip recorded, and it is back within seconds rather than minutes.
+    expect(await runsFor(i)).toHaveLength(0)
+    const after = await get(i)
+    expect(after.enabled).toBe(true)
+    const next = new Date(after.nextRunAt).getTime()
+    expect(next).toBeGreaterThanOrEqual(before)
+    expect(next).toBeLessThan(before + 30_000)
+    expect(await pendingTicks(i)).toBe(1)
+
+    await finishRun(run!._id, {
+      status: "succeeded",
+      result: { success: true, reason: "ok", steps: 1 },
+    })
+    await releaseDeviceLock("U", run!._id)
+    await stop(q, i)
+  })
+
+  it("a queue schedule leaves the rotation when its budget runs out", async () => {
+    const t = await task("qbudget")
+    const id = (
+      await create({
+        taskId: t,
+        deviceSerial: "S",
+        mode: "queue",
+        order: 1,
+        maxRuns: 1,
+      })
+    ).body.schedule.id as string
+    expect(await cycle("S")).toBe(true)
+    expect(await get(id)).toMatchObject({ runCount: 1, enabled: false })
+    expect(await cycle("S")).toBe(false)
+    expect(await runsFor(id)).toHaveLength(1)
+  })
+
+  it("a queue schedule waits for an offline device without recording skips", async () => {
+    const t = await task("qoffline")
+    const id = (
+      await create({ taskId: t, deviceSerial: "T", mode: "queue", order: 1 })
+    ).body.schedule.id as string
+    const { dispatchDevices } = await import("@/lib/schedules")
+
+    devices = ONLINE.filter((d) => d.serial !== "T")
+    expect(await dispatchDevices()).toBe(0)
+    expect(await runsFor(id)).toHaveLength(0)
+    expect((await get(id)).enabled).toBe(true)
+
+    devices = [...ONLINE]
+    expect(await dispatchDevices()).toBe(1)
+    await drain("T")
+    expect((await get(id)).runCount).toBe(1)
+    await stop(id)
+  })
+
+  it("switching modes moves the tick with it, and a half-switch is refused", async () => {
+    const t = await task("switch")
+    const id = (
+      await create({ taskId: t, deviceSerial: "A", intervalSeconds: 100 })
+    ).body.schedule.id as string
+    expect(await pendingTicks(id)).toBe(1)
+
+    const toQueue = await patch(id, { mode: "queue", order: 3 })
+    expect(toQueue.body.schedule).toMatchObject({
+      mode: "queue",
+      order: 3,
+      intervalSeconds: null,
+      nextRunAt: null,
+    })
+    expect(await pendingTicks(id)).toBe(0)
+
+    const back = await patch(id, { mode: "interval", intervalSeconds: 50 })
+    expect(back.body.schedule).toMatchObject({
+      mode: "interval",
+      intervalSeconds: 50,
+      order: null,
+    })
+    expect(await pendingTicks(id)).toBe(1)
+
+    expect((await patch(id, { mode: "queue" })).status).toBe(400)
+    expect(
+      (await create({ taskId: t, deviceSerial: "A", mode: "queue" })).status
+    ).toBe(400)
+    expect((await create({ taskId: t, deviceSerial: "A" })).status).toBe(400)
+    await stop(id)
   })
 
   it("a scheduled run finished outside its tick is counted once and plans the next tick", async () => {

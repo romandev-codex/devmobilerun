@@ -1,5 +1,12 @@
 import mongoose, { Schema, type InferSchemaType, type Model } from "mongoose"
 
+/**
+ * How a schedule decides when to run: on a timer, or as the next in line for
+ * its device whenever that device is free.
+ */
+export const SCHEDULE_MODES = ["interval", "queue"] as const
+export type ScheduleMode = (typeof SCHEDULE_MODES)[number]
+
 const scheduleSchema = new Schema(
   {
     taskId: {
@@ -9,7 +16,16 @@ const scheduleSchema = new Schema(
       index: true,
     },
     deviceSerial: { type: String, required: true, index: true },
-    intervalSeconds: { type: Number, required: true },
+    mode: {
+      type: String,
+      enum: SCHEDULE_MODES,
+      required: true,
+      default: "interval",
+    },
+    /** Interval mode only; null in queue mode. */
+    intervalSeconds: { type: Number, default: null },
+    /** Queue mode only: position in its device's rotation. Null in interval mode. */
+    order: { type: Number, default: null },
     /** null means unlimited. */
     maxRuns: { type: Number, default: null },
     /** Consecutive failures that disable the schedule; null means never. */

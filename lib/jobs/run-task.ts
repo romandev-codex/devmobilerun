@@ -47,6 +47,7 @@ export async function executeRun(runId: string): Promise<void> {
   if (run.status !== "queued") return
 
   if (!(await acquireDeviceLock(run.deviceSerial, run._id))) {
+    // Never started, so it is not counted against the schedule that asked for it.
     await finishRun(run._id, {
       status: "failed",
       error: `Device ${run.deviceSerial} is busy`,
@@ -91,6 +92,12 @@ export async function executeRun(runId: string): Promise<void> {
       run.taskId,
       settings.screenshotRetentionRuns
     ).catch((err) => console.error("[run-task] screenshot pruning failed", err))
+    // A run started by a schedule owes the schedule its bookkeeping, whether a
+    // tick ran it inline or the device dispatcher queued it.
+    const { afterScheduledRunFinished } = await import("@/lib/schedules")
+    await afterScheduledRunFinished(run._id).catch((err: unknown) =>
+      console.error("[run-task] schedule bookkeeping failed", err)
+    )
   }
 }
 

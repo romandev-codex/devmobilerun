@@ -4,6 +4,9 @@ import mongoose from "mongoose"
 import { connectDb } from "@/lib/db"
 import { reconcileOnBoot } from "@/lib/jobs/reconcile"
 import {
+  DEVICE_DISPATCH_EVERY,
+  DEVICE_DISPATCH_JOB,
+  dispatchDevices,
   executeScheduleTick,
   reconcileSchedules,
   SCHEDULE_TICK_JOB,
@@ -75,6 +78,14 @@ export async function getAgenda(): Promise<Agenda> {
     },
     { lockLifetime: MAX_RUN_LIFETIME_MS, concurrency: 20 }
   )
+  // One instance at a time, so two polls never hand the same device two runs.
+  agenda.define(
+    DEVICE_DISPATCH_JOB,
+    async () => {
+      await dispatchDevices()
+    },
+    { lockLifetime: 60_000, concurrency: 1 }
+  )
   // One-off jobs are not needed once they ran; keep the collection small.
   agenda.on("success", (job: Job) => {
     if (!job.attrs.repeatInterval) void job.remove().catch(() => undefined)
@@ -101,6 +112,8 @@ export function startAgenda(): Promise<void> {
           console.warn("[agenda] reconciled after restart", report)
         }
         await agenda.start()
+        // Idempotent: re-running it just updates the one dispatch job.
+        await agenda.every(DEVICE_DISPATCH_EVERY, DEVICE_DISPATCH_JOB)
       })
       .catch((err) => {
         globalForAgenda.__agendaStarted = undefined

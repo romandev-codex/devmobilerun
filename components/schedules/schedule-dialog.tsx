@@ -15,6 +15,7 @@ import {
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { apiJson } from "@/lib/client/api"
+import type { ScheduleMode } from "@/lib/models/schedule"
 import type { ScheduleView } from "@/lib/schedules"
 
 export type ScheduleOption = { id: string; name: string }
@@ -45,9 +46,11 @@ export function ScheduleDialog({
   const [deviceSerial, setDeviceSerial] = useState(
     schedule?.deviceSerial ?? devices[0]?.serial ?? ""
   )
+  const [mode, setMode] = useState<ScheduleMode>(schedule?.mode ?? "interval")
   const [interval, setInterval] = useState(
     String(schedule?.intervalSeconds ?? 300)
   )
+  const [order, setOrder] = useState(String(schedule?.order ?? 1))
   const [maxRuns, setMaxRuns] = useState(
     schedule?.maxRuns ? String(schedule.maxRuns) : ""
   )
@@ -64,7 +67,10 @@ export function ScheduleDialog({
     const payload = {
       ...(schedule ? {} : { taskId }),
       deviceSerial,
-      intervalSeconds: Number(interval),
+      mode,
+      ...(mode === "interval"
+        ? { intervalSeconds: Number(interval), order: null }
+        : { order: Number(order), intervalSeconds: null }),
       maxRuns: maxRuns.trim() === "" ? null : Number(maxRuns),
       maxFails: maxFails.trim() === "" ? null : Number(maxFails),
     }
@@ -88,10 +94,10 @@ export function ScheduleDialog({
               {schedule ? "Edit schedule" : "New schedule"}
             </DialogTitle>
             <DialogDescription>
-              The task repeats on the chosen device. The next run starts the
-              interval after the previous one finished; a busy or offline device
-              skips that tick. Failing max fails times in a row disables the
-              schedule.
+              {mode === "interval"
+                ? "The task repeats on the chosen device. The next run starts the interval after the previous one finished; a busy or offline device skips that tick."
+                : "The device works through its queue schedules in order, starting each one as soon as it is free. A due timed schedule goes first."}{" "}
+              Failing max fails times in a row disables the schedule.
             </DialogDescription>
           </DialogHeader>
           {!schedule ? (
@@ -129,17 +135,47 @@ export function ScheduleDialog({
               ))}
             </select>
           </div>
+          <div className="grid gap-1.5">
+            <Label htmlFor="mode">Trigger</Label>
+            <select
+              id="mode"
+              value={mode}
+              onChange={(e) => setMode(e.target.value as ScheduleMode)}
+              className={selectClass}
+            >
+              <option value="interval">Repeat on a timer</option>
+              <option value="queue">
+                Next in line when the device is free
+              </option>
+            </select>
+          </div>
           <div className="grid grid-cols-3 gap-4">
             <div className="grid gap-1.5">
-              <Label htmlFor="interval">Interval (seconds)</Label>
-              <Input
-                id="interval"
-                type="number"
-                min={1}
-                value={interval}
-                onChange={(e) => setInterval(e.target.value)}
-                required
-              />
+              {mode === "interval" ? (
+                <>
+                  <Label htmlFor="interval">Interval (seconds)</Label>
+                  <Input
+                    id="interval"
+                    type="number"
+                    min={1}
+                    value={interval}
+                    onChange={(e) => setInterval(e.target.value)}
+                    required
+                  />
+                </>
+              ) : (
+                <>
+                  <Label htmlFor="order">Order</Label>
+                  <Input
+                    id="order"
+                    type="number"
+                    min={0}
+                    value={order}
+                    onChange={(e) => setOrder(e.target.value)}
+                    required
+                  />
+                </>
+              )}
             </div>
             <div className="grid gap-1.5">
               <Label htmlFor="maxRuns">Max runs</Label>
