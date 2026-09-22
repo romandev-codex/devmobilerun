@@ -63,6 +63,7 @@ export function TaskTable({ tasks }: { tasks: TaskSummary[] }) {
                   taskId={t.id}
                   taskName={t.name}
                   scheduleCount={t.scheduleCount}
+                  editHref={`/tasks/${t.id}`}
                 />
               </div>
             </TableCell>

@@ -1,8 +1,9 @@
 "use client"
 
+import Link from "next/link"
 import { useRouter } from "next/navigation"
 import { useState } from "react"
-import { Copy, Trash2 } from "lucide-react"
+import { Copy, Pencil, Trash2 } from "lucide-react"
 
 import { RunTaskButton } from "@/components/tasks/run-task-button"
 import { Button } from "@/components/ui/button"
@@ -21,11 +22,13 @@ export function TaskActions({
   taskName,
   scheduleCount,
   afterDelete = "/tasks",
+  editHref,
 }: {
   taskId: string
   taskName: string
   scheduleCount: number
   afterDelete?: string
+  editHref?: string
 }) {
   const router = useRouter()
   const [confirming, setConfirming] = useState(false)
@@ -62,6 +65,16 @@ export function TaskActions({
         <span className="mr-2 text-xs text-destructive">{error}</span>
       ) : null}
       <RunTaskButton taskId={taskId} taskName={taskName} />
+      {editHref ? (
+        <Button
+          variant="ghost"
+          size="sm"
+          title="Edit"
+          render={<Link href={editHref} aria-label={`Edit ${taskName}`} />}
+        >
+          <Pencil className="size-4" />
+        </Button>
+      ) : null}
       <Button
         variant="ghost"
         size="sm"
