@@ -51,6 +51,9 @@ export function ScheduleDialog({
   const [maxRuns, setMaxRuns] = useState(
     schedule?.maxRuns ? String(schedule.maxRuns) : ""
   )
+  const [maxFails, setMaxFails] = useState(
+    schedule?.maxFails ? String(schedule.maxFails) : ""
+  )
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
 
@@ -63,6 +66,7 @@ export function ScheduleDialog({
       deviceSerial,
       intervalSeconds: Number(interval),
       maxRuns: maxRuns.trim() === "" ? null : Number(maxRuns),
+      maxFails: maxFails.trim() === "" ? null : Number(maxFails),
     }
     const res = await apiJson(
       schedule ? `/api/schedules/${schedule.id}` : "/api/schedules",
@@ -86,7 +90,8 @@ export function ScheduleDialog({
             <DialogDescription>
               The task repeats on the chosen device. The next run starts the
               interval after the previous one finished; a busy or offline device
-              skips that tick.
+              skips that tick. Failing max fails times in a row disables the
+              schedule.
             </DialogDescription>
           </DialogHeader>
           {!schedule ? (
@@ -124,7 +129,7 @@ export function ScheduleDialog({
               ))}
             </select>
           </div>
-          <div className="grid grid-cols-2 gap-4">
+          <div className="grid grid-cols-3 gap-4">
             <div className="grid gap-1.5">
               <Label htmlFor="interval">Interval (seconds)</Label>
               <Input
@@ -145,6 +150,17 @@ export function ScheduleDialog({
                 placeholder="unlimited"
                 value={maxRuns}
                 onChange={(e) => setMaxRuns(e.target.value)}
+              />
+            </div>
+            <div className="grid gap-1.5">
+              <Label htmlFor="maxFails">Max fails</Label>
+              <Input
+                id="maxFails"
+                type="number"
+                min={1}
+                placeholder="never"
+                value={maxFails}
+                onChange={(e) => setMaxFails(e.target.value)}
               />
             </div>
           </div>

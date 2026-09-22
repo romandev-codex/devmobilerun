@@ -12,9 +12,13 @@ const scheduleSchema = new Schema(
     intervalSeconds: { type: Number, required: true },
     /** null means unlimited. */
     maxRuns: { type: Number, default: null },
+    /** Consecutive failures that disable the schedule; null means never. */
+    maxFails: { type: Number, default: null },
     enabled: { type: Boolean, required: true, default: true },
     /** Runs that actually started (skipped ticks do not count). */
     runCount: { type: Number, required: true, default: 0 },
+    /** Failed runs in a row; any success resets it. */
+    failStreak: { type: Number, required: true, default: 0 },
     lastRunId: { type: Schema.Types.ObjectId, ref: "Run", default: null },
     lastRunAt: { type: Date, default: null },
     nextRunAt: { type: Date, default: null },

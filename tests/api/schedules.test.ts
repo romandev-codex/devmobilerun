@@ -1,5 +1,5 @@
 import mongoose from "mongoose"
-import { afterAll, beforeAll, describe, expect, it } from "vitest"
+import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest"
 
 import {
   startFakeExecutor,
@@ -16,14 +16,24 @@ beforeAll(async () => {
   useFakeExecutor(fake)
   fake.on("GET", "/devices", (_req, _res, { json }) => json(devices))
   fake.on("POST", "/runs", (_req, _res, { json }) => json({ runId: "x" }, 202))
-  fake.on("GET", "/runs/:id/events", (_req, res) =>
-    writeSse(res, [
-      { event: "result", data: { success: true, reason: "ok", steps: 1 } },
-    ])
-  )
+  outcome(true)
   const { GET } = await import("@/app/api/devices/route")
   await GET(new Request("http://app/api/devices"), {})
 })
+
+/** Scripts what the executor reports for the runs that follow. */
+function outcome(success: boolean) {
+  fake.on("GET", "/runs/:id/events", (_req, res) =>
+    writeSse(res, [
+      {
+        event: "result",
+        data: { success, reason: success ? "ok" : "nope", steps: 1 },
+      },
+    ])
+  )
+}
+
+afterEach(() => outcome(true))
 
 afterAll(async () => {
   const { stopAgenda } = await import("@/lib/jobs/agenda")
@@ -106,8 +116,10 @@ describe("schedules", () => {
       deviceSerial: "A",
       intervalSeconds: 60,
       maxRuns: null,
+      maxFails: null,
       enabled: true,
       runCount: 0,
+      failStreak: 0,
     })
     expect(body.schedule.nextRunAt).toBeTruthy()
     expect(await pendingTicks(body.schedule.id)).toBe(1)
@@ -200,6 +212,89 @@ describe("schedules", () => {
     expect(await pendingTicks(id)).toBe(0)
     await tick(id)
     expect(await runsFor(id)).toHaveLength(1)
+  })
+
+  it("disables itself after maxFails failures in a row", async () => {
+    const t = await task("maxfails")
+    const { body } = await create({
+      taskId: t,
+      deviceSerial: "A",
+      intervalSeconds: 10,
+      maxFails: 2,
+    })
+    const id = body.schedule.id as string
+    outcome(false)
+    await tick(id)
+    expect(await get(id)).toMatchObject({ failStreak: 1, enabled: true })
+    expect(await pendingTicks(id)).toBe(1)
+
+    await tick(id)
+    expect(await get(id)).toMatchObject({
+      failStreak: 2,
+      runCount: 2,
+      enabled: false,
+      nextRunAt: null,
+    })
+    expect(await pendingTicks(id)).toBe(0)
+    await tick(id)
+    expect(await runsFor(id)).toHaveLength(2)
+  })
+
+  it("a success clears the fail streak and a skipped tick leaves it alone", async () => {
+    const t = await task("streak")
+    const { body } = await create({
+      taskId: t,
+      deviceSerial: "A",
+      intervalSeconds: 10,
+      maxFails: 2,
+    })
+    const id = body.schedule.id as string
+    outcome(false)
+    await tick(id)
+    expect((await get(id)).failStreak).toBe(1)
+
+    outcome(true)
+    await tick(id)
+    expect((await get(id)).failStreak).toBe(0)
+
+    outcome(false)
+    await tick(id)
+    expect((await get(id)).failStreak).toBe(1)
+
+    devices = []
+    await tick(id)
+    devices = [{ serial: "A", state: "device", model: "a" }]
+    expect(await get(id)).toMatchObject({ failStreak: 1, enabled: true })
+
+    // Had the skip counted, this second real failure would be the third.
+    await tick(id)
+    expect(await get(id)).toMatchObject({ failStreak: 2, enabled: false })
+  })
+
+  it("lowering maxFails onto a streak disables, re-enabling forgives it", async () => {
+    const t = await task("forgive")
+    const { body } = await create({
+      taskId: t,
+      deviceSerial: "A",
+      intervalSeconds: 10,
+      maxFails: 3,
+    })
+    const id = body.schedule.id as string
+    outcome(false)
+    await tick(id)
+    await tick(id)
+    expect(await get(id)).toMatchObject({ failStreak: 2, enabled: true })
+
+    const lowered = await patch(id, { maxFails: 2 })
+    expect(lowered.body.schedule).toMatchObject({
+      failStreak: 2,
+      enabled: false,
+    })
+    expect(await pendingTicks(id)).toBe(0)
+
+    const re = await patch(id, { enabled: true })
+    expect(re.body.schedule).toMatchObject({ failStreak: 0, enabled: true })
+    expect(await pendingTicks(id)).toBe(1)
   })
 
   it("toggling enabled cancels or plans ticks, and edits re-plan", async () => {

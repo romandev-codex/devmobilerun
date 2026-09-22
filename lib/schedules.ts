@@ -22,8 +22,10 @@ export type ScheduleView = {
   deviceSerial: string
   intervalSeconds: number
   maxRuns: number | null
+  maxFails: number | null
   enabled: boolean
   runCount: number
+  failStreak: number
   lastRunId: string | null
   lastRunAt: string | null
   lastRunStatus: string | null
@@ -41,6 +43,7 @@ export const createScheduleSchema = z.object({
     .min(1)
     .max(30 * 24 * 3600),
   maxRuns: z.number().int().min(1).max(1_000_000).nullable().default(null),
+  maxFails: z.number().int().min(1).max(1_000_000).nullable().default(null),
   enabled: z.boolean().default(true),
 })
 
@@ -53,6 +56,7 @@ export const updateScheduleSchema = z
       .min(1)
       .max(30 * 24 * 3600),
     maxRuns: z.number().int().min(1).max(1_000_000).nullable(),
+    maxFails: z.number().int().min(1).max(1_000_000).nullable(),
     enabled: z.boolean(),
   })
   .partial()
@@ -89,8 +93,10 @@ function toView(doc: ScheduleDoc, related: Related): ScheduleView {
     deviceSerial: doc.deviceSerial,
     intervalSeconds: doc.intervalSeconds,
     maxRuns: doc.maxRuns ?? null,
+    maxFails: doc.maxFails ?? null,
     enabled: doc.enabled,
     runCount: doc.runCount,
+    failStreak: doc.failStreak ?? 0,
     lastRunId: doc.lastRunId ? doc.lastRunId.toString() : null,
     lastRunAt: doc.lastRunAt ? doc.lastRunAt.toISOString() : null,
     lastRunStatus: doc.lastRunId
@@ -117,6 +123,13 @@ export function isExhausted(
   s: Pick<ScheduleDoc, "maxRuns" | "runCount">
 ): boolean {
   return s.maxRuns != null && s.runCount >= s.maxRuns
+}
+
+/** A schedule that failed `maxFails` times in a row must not be planned again. */
+export function isFailing(
+  s: Pick<ScheduleDoc, "maxFails" | "failStreak">
+): boolean {
+  return s.maxFails != null && (s.failStreak ?? 0) >= s.maxFails
 }
 
 // ── Agenda planning ─────────────────────────────────────────────────────
@@ -228,23 +241,30 @@ export async function updateSchedule(
       .lean()
     if (!device) throw notFound("Device")
   }
+  // Turning a schedule back on forgives its failures; without this it would be
+  // disabled again at once, and only raising maxFails could revive it.
+  const set: Record<string, unknown> =
+    patch.enabled === true && !before.enabled
+      ? { ...patch, failStreak: 0 }
+      : { ...patch }
   const after = await Schedule.findByIdAndUpdate(
     oid,
-    { $set: patch },
+    { $set: set },
     { new: true }
   ).lean<ScheduleDoc>()
   if (!after) throw notFound("Schedule")
 
   if (!after.enabled) {
     await disableSchedule(oid)
-  } else if (isExhausted(after)) {
+  } else if (isExhausted(after) || isFailing(after)) {
     await disableSchedule(oid)
   } else if (!before.enabled) {
     await planNextTick(oid, new Date())
   } else if (
     patch.intervalSeconds !== undefined ||
     patch.deviceSerial !== undefined ||
-    patch.maxRuns !== undefined
+    patch.maxRuns !== undefined ||
+    patch.maxFails !== undefined
   ) {
     const when = nextTickFor(after)
     await planNextTick(oid, when)
@@ -293,7 +313,8 @@ export async function runScheduleNow(id: string): Promise<{ runId: string }> {
 /**
  * One scheduled firing. Skips (and records) when the device is unavailable,
  * otherwise runs the task inline and plans the next tick `intervalSeconds`
- * after this one finished. Disables the schedule when `maxRuns` is reached.
+ * after this one finished. Disables the schedule when `maxRuns` is reached or
+ * it has failed `maxFails` times in a row.
  */
 export async function executeScheduleTick(scheduleId: string): Promise<void> {
   await connectDb()
@@ -370,24 +391,46 @@ export async function executeScheduleTick(scheduleId: string): Promise<void> {
 }
 
 /**
+ * What a finished run does to the fail streak: a failed or lost run extends it,
+ * a success clears it, and a deliberate cancellation leaves it as it was.
+ */
+async function failStreakEffect(
+  runId: mongoose.Types.ObjectId
+): Promise<"extend" | "clear" | "keep"> {
+  const run = await Run.findById(runId)
+    .select("status")
+    .lean<{ status: string }>()
+  if (!run) return "keep"
+  if (run.status === "succeeded") return "clear"
+  if (run.status === "failed" || run.status === "lost") return "extend"
+  return "keep"
+}
+
+/**
  * Counts a finished scheduled run against its schedule and returns when the
- * next tick should fire, or null when the schedule is disabled or exhausted.
+ * next tick should fire, or null when the schedule is disabled, exhausted or
+ * has just failed once too often.
  */
 async function recordScheduledRun(
   scheduleId: mongoose.Types.ObjectId,
   runId: mongoose.Types.ObjectId
 ): Promise<Date | null> {
   const finishedAt = new Date()
+  const effect = await failStreakEffect(runId)
   const updated = await Schedule.findByIdAndUpdate(
     scheduleId,
     {
-      $inc: { runCount: 1 },
-      $set: { lastRunId: runId, lastRunAt: finishedAt },
+      $inc: { runCount: 1, ...(effect === "extend" ? { failStreak: 1 } : {}) },
+      $set: {
+        lastRunId: runId,
+        lastRunAt: finishedAt,
+        ...(effect === "clear" ? { failStreak: 0 } : {}),
+      },
     },
     { new: true }
   ).lean<ScheduleDoc>()
   if (!updated || !updated.enabled) return null
-  if (isExhausted(updated)) {
+  if (isExhausted(updated) || isFailing(updated)) {
     await disableSchedule(scheduleId)
     return null
   }
@@ -427,7 +470,7 @@ export async function reconcileSchedules(): Promise<number> {
     ).map((r) => r.scheduleId.toString())
   )
   for (const s of enabled) {
-    if (isExhausted(s)) {
+    if (isExhausted(s) || isFailing(s)) {
       await disableSchedule(s._id)
       continue
     }

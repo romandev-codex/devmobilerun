@@ -47,6 +47,7 @@ export function ScheduleTable({
           <TableHead>Device</TableHead>
           <TableHead>Every</TableHead>
           <TableHead>Runs</TableHead>
+          <TableHead>Fails</TableHead>
           <TableHead>Last run</TableHead>
           <TableHead>Next run</TableHead>
           <TableHead className="text-right">Actions</TableHead>
@@ -78,6 +79,11 @@ export function ScheduleTable({
               {s.maxRuns
                 ? `${s.runCount} of ${s.maxRuns}`
                 : `${s.runCount}, unlimited`}
+            </TableCell>
+            <TableCell>
+              {s.maxFails
+                ? `${s.failStreak} of ${s.maxFails}`
+                : s.failStreak || "0"}
             </TableCell>
             <TableCell>
               {s.lastRunId && s.lastRunStatus ? (
