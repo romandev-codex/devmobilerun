@@ -10,7 +10,7 @@ agent:
   # Enable planning with reasoning mode
   reasoning: false
   # Enable streaming LLM responses to console in real-time
-  streaming: true
+  streaming: false
   # Use screenshots only and do not read an accessibility tree
   vision_only: false
   # Sleep duration after each action, waits for ui state to be updated (seconds)

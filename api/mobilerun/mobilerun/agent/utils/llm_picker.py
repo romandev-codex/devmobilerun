@@ -821,7 +821,16 @@ def load_llm(provider_name: str, model: str | None = None, **kwargs: Any) -> LLM
     elif provider_name == "OpenRouter":
         from llama_index.llms.openrouter import OpenRouter
 
+        from mobilerun.agent.utils.openrouter_debug import (
+            debug_http_clients,
+            is_development,
+        )
+
         llm_class = OpenRouter
+        if is_development():
+            # IS_DEVELOPMENT=true: print every OpenRouter request/response to the console.
+            for key, client in debug_http_clients().items():
+                kwargs.setdefault(key, client)
     else:
         raise ValueError(
             f"Unsupported provider '{provider_name}'. "
