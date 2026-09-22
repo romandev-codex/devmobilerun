@@ -5,10 +5,12 @@ import { PageHeader } from "@/components/app/page-header"
 import { RunTable } from "@/components/runs/run-table"
 import { TaskActions } from "@/components/tasks/task-actions"
 import { TaskForm } from "@/components/tasks/task-form"
+import { TaskMemoryForm } from "@/components/tasks/task-memory-form"
 import { Button } from "@/components/ui/button"
 import { ApiError } from "@/lib/api/errors"
 import { deviceLabel, listDevices } from "@/lib/devices"
 import { listRuns } from "@/lib/runs/service"
+import { getTaskMemory } from "@/lib/task-memory"
 import { getTask } from "@/lib/tasks"
 
 export const dynamic = "force-dynamic"
@@ -21,7 +23,8 @@ export default async function TaskPage({
   searchParams: Promise<{ tab?: string; before?: string }>
 }) {
   const [{ id }, sp] = await Promise.all([params, searchParams])
-  const tab = sp.tab === "history" ? "history" : "edit"
+  const tab =
+    sp.tab === "history" ? "history" : sp.tab === "memory" ? "memory" : "edit"
   const task = await getTask(id).catch((err) => {
     if (err instanceof ApiError && err.status === 404) notFound()
     throw err
@@ -41,13 +44,11 @@ export default async function TaskPage({
         }
       />
       <div className="mb-6 flex gap-1 border-b">
-        {(["edit", "history"] as const).map((t) => (
+        {(["edit", "memory", "history"] as const).map((t) => (
           <Link
             key={t}
             href={
-              t === "edit"
-                ? `/tasks/${task.id}`
-                : `/tasks/${task.id}?tab=history`
+              t === "edit" ? `/tasks/${task.id}` : `/tasks/${task.id}?tab=${t}`
             }
             className={
               tab === t
@@ -55,12 +56,14 @@ export default async function TaskPage({
                 : "px-3 py-2 text-sm text-muted-foreground"
             }
           >
-            {t === "edit" ? "Edit" : "History"}
+            {t === "edit" ? "Edit" : t === "memory" ? "Memory" : "History"}
           </Link>
         ))}
       </div>
       {tab === "edit" ? (
         <TaskForm task={task} />
+      ) : tab === "memory" ? (
+        <TaskMemoryForm memory={await getTaskMemory(task.id)} />
       ) : (
         <TaskHistory taskId={task.id} before={sp.before} />
       )}

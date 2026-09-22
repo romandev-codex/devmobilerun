@@ -35,6 +35,7 @@ class StartRunRequest(BaseModel):
     variables: dict[str, str] = Field(default_factory=dict)
     prompts: dict[str, str] = Field(default_factory=dict)
     appCards: list[dict[str, Any]] = Field(default_factory=list)
+    memory: dict[str, str] = Field(default_factory=dict)
 
 
 class ActiveRunResponse(BaseModel):
@@ -56,6 +57,7 @@ async def start_run(body: StartRunRequest, runs: RunManager = Depends(get_run_ma
         variables=body.variables,
         prompts=body.prompts,
         app_cards=body.appCards,
+        memory=body.memory,
     )
     try:
         await runs.start(spec)

@@ -45,6 +45,7 @@ class RunSpec:
     variables: dict[str, str] = field(default_factory=dict)
     prompts: dict[str, str] = field(default_factory=dict)
     app_cards: list[dict[str, Any]] = field(default_factory=list)
+    memory: dict[str, str] = field(default_factory=dict)
 
 
 class DeviceNotFound(Exception):
@@ -201,12 +202,19 @@ def _jsonable(value: Any) -> Any:
 def compose_goal(spec: RunSpec) -> str:
     """The instruction the agent receives.
 
+    Task memory is always appended so the agent sees what earlier runs stored.
     The framework reads app cards only in reasoning mode (the manager agent);
     in direct-execution mode the cards are folded into the instruction instead
     so they still reach the model.
     """
+    from .memory import memory_section
+
+    goal = spec.instruction
+    memory = memory_section(spec.memory)
+    if memory:
+        goal = goal + "\n\n" + memory
     if spec.reasoning or not spec.app_cards:
-        return spec.instruction
+        return goal
     sections = []
     for card in spec.app_cards:
         package = str(card.get("packageName") or "").strip()
@@ -217,16 +225,19 @@ def compose_goal(spec: RunSpec) -> str:
         title = f"{name} ({package})" if name else package
         sections.append(f"### {title}\n{content}")
     if not sections:
-        return spec.instruction
-    return spec.instruction + "\n\nApp guidance:\n" + "\n\n".join(sections)
+        return goal
+    return goal + "\n\nApp guidance:\n" + "\n\n".join(sections)
 
 
 class MobilerunAgentRun:
     """Drives a real MobileAgent and yields normalized events."""
 
     def __init__(self, spec: RunSpec) -> None:
+        from .memory import MemoryStore
+
         self.spec = spec
         self._handler: Any = None
+        self.memory = MemoryStore(spec.memory)
 
     async def events(self) -> AsyncIterator[RunEvent]:
         import os
@@ -238,6 +249,7 @@ class MobilerunAgentRun:
         import shutil
 
         from .app_cards import write_app_cards_dir
+        from .memory import memory_tools
 
         os.environ.setdefault("MOBILERUN_STREAM_SCREENSHOTS", "1")
         spec = self.spec
@@ -263,6 +275,7 @@ class MobilerunAgentRun:
                 config=config,
                 variables=spec.variables or None,
                 prompts=spec.prompts or None,
+                custom_tools=memory_tools(self.memory),
                 timeout=max(600, spec.max_steps * 90),
             )
 
@@ -275,7 +288,14 @@ class MobilerunAgentRun:
                 mapped = map_framework_event(raw, step_counter)
                 if mapped is not None:
                     yield mapped
+                # A memory tool ran inside the step that produced this event;
+                # stream its edits right away so the app persists them even if
+                # the run later fails.
+                for change in self.memory.drain():
+                    yield change
             result = await handler
+            for change in self.memory.drain():
+                yield change
             yield RunEvent(
                 "result",
                 {"success": bool(result.success), "reason": result.reason, "steps": int(result.steps)},

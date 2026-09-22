@@ -99,15 +99,18 @@ npm run check                   # typecheck + lint + both test suites
 
 1. "Run now" (or a schedule tick) creates a run document and enqueues an Agenda job.
 2. The job takes the device lock, opens the start URL on the phone through an adb intent, starts the agent on the
-   executor with the composed instruction, per-task options and variables, plus the global prompt overrides and
-   app cards from Settings.
-3. The executor streams events (thoughts, actions, plans, per-step screenshots, result) which the job writes to
-   MongoDB; step images go to GridFS and are pruned per the retention setting.
-4. The run page receives events pushed from the job over SSE. Stop cancels the agent on the executor; if the
+   executor with the composed instruction, per-task options, variables and memory, plus the global prompt
+   overrides and app cards from Settings.
+3. The executor streams events (thoughts, actions, plans, per-step screenshots, memory changes, result) which the
+   job writes to MongoDB; step images go to GridFS and are pruned per the retention setting.
+4. Task memory is the key/value facts a task keeps between runs (Memory tab on the task page). The agent sees
+   them in its instruction and can change them with the `save_memory` / `delete_memory` tools; each change is
+   persisted as it happens, so a run that fails halfway still leaves what it learned.
+5. The run page receives events pushed from the job over SSE. Stop cancels the agent on the executor; if the
    executor is unreachable the stop fails rather than pretending the phone stopped.
-5. Schedules re-plan the next tick from the end of each run, record a skipped run when the device is busy or
+6. Schedules re-plan the next tick from the end of each run, record a skipped run when the device is busy or
    offline, and disable themselves at their max run count.
-6. After a server restart, in-flight runs reattach to the executor's stream from the last stored event; a run is
+7. After a server restart, in-flight runs reattach to the executor's stream from the last stored event; a run is
    marked lost only when the executor no longer knows it. Scheduled runs finished this way still count toward
    their schedule.
 7. App cards are read by the framework's planner (reasoning on). With reasoning off they are appended to the

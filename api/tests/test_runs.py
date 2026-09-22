@@ -15,6 +15,7 @@ def start_body(run_id="run-1", serial="emulator-5554", **extra):
         "instruction": "Open settings and report the Android version",
         "options": {"vision": True, "reasoning": False, "maxSteps": 7},
         "variables": {"account": "work"},
+        "memory": {"last_id": "42"},
     }
     body.update(extra)
     return body
@@ -47,6 +48,7 @@ async def test_start_run_streams_events_and_ends_after_result(client, framework)
     assert spec.instruction.startswith("Open settings")
     assert (spec.vision, spec.reasoning, spec.max_steps) == (True, False, 7)
     assert spec.variables == {"account": "work"}
+    assert spec.memory == {"last_id": "42"}
 
 
 async def test_run_without_start_url_does_not_open_anything(client, framework):

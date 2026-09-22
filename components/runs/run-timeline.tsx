@@ -49,6 +49,16 @@ const ROWS: Record<string, RowSpec> = {
       </div>
     ),
   },
+  memory: {
+    label: "memory",
+    body: (p) => (
+      <p className="font-mono text-xs">
+        {p.op === "delete"
+          ? `forget ${String(p.key)}`
+          : `${String(p.key)} = ${String(p.value ?? "")}`}
+      </p>
+    ),
+  },
   plan: {
     label: "plan",
     body: (p) => (
@@ -197,6 +207,7 @@ export function RunTimeline({
       "thought",
       "action",
       "plan",
+      "memory",
       "screenshot",
       "result",
       "cancelled",

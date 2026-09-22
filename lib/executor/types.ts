@@ -30,4 +30,6 @@ export type StartRunRequest = {
   variables: Record<string, string>
   prompts?: Record<string, string>
   appCards?: unknown[]
+  /** Task memory entries stored by earlier runs; the agent may change them. */
+  memory?: Record<string, string>
 }

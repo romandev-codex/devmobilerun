@@ -6,6 +6,7 @@ import { asObjectId as toObjectId, connectDb } from "@/lib/db"
 import { Run } from "@/lib/models/run"
 import { Schedule } from "@/lib/models/schedule"
 import { Task, type TaskDoc } from "@/lib/models/task"
+import { deleteTaskMemory } from "@/lib/task-memory"
 
 const asObjectId = (id: string, what = "Task") => toObjectId(id, what)
 
@@ -248,7 +249,7 @@ export async function duplicateTask(id: string): Promise<TaskView> {
   return toTaskView(doc.toObject() as TaskDoc)
 }
 
-/** Deletes a task together with its schedules. Runs are kept as history. */
+/** Deletes a task together with its schedules and memory. Runs are kept as history. */
 export async function deleteTask(
   id: string
 ): Promise<{ deletedSchedules: number }> {
@@ -256,6 +257,7 @@ export async function deleteTask(
   const oid = asObjectId(id)
   const res = await Task.deleteOne({ _id: oid })
   if (res.deletedCount === 0) throw notFound("Task")
+  await deleteTaskMemory(oid)
   const ids = (
     await Schedule.find({ taskId: oid })
       .select("_id")

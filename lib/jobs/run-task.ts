@@ -17,6 +17,7 @@ import {
   transitionRun,
 } from "@/lib/runs/service"
 import { getSettings } from "@/lib/settings"
+import { applyMemoryChange, taskMemoryMap } from "@/lib/task-memory"
 
 export const RUN_TASK_JOB = "run-task"
 
@@ -55,7 +56,10 @@ export async function executeRun(runId: string): Promise<void> {
     return
   }
 
-  const settings = await getSettings()
+  const [settings, memory] = await Promise.all([
+    getSettings(),
+    taskMemoryMap(run.taskId),
+  ])
   const started = await transitionRun(run._id, "queued", {
     status: "running",
     startedAt: new Date(),
@@ -78,8 +82,9 @@ export async function executeRun(runId: string): Promise<void> {
       variables: (run.variables as Record<string, string>) ?? {},
       prompts: settings.prompts,
       appCards: settings.appCards,
+      memory,
     })
-    await tailUntilFinished(run._id, -1)
+    await tailUntilFinished(run._id, run.taskId, -1)
   } catch (err) {
     const message =
       err instanceof ExecutorError || err instanceof Error
@@ -114,7 +119,7 @@ async function resumeRun(
       return
     }
     await acquireDeviceLock(deviceSerial, runId)
-    await tailUntilFinished(runId, last ? last.seq : -1)
+    await tailUntilFinished(runId, taskId, last ? last.seq : -1)
   } catch (err) {
     if (err instanceof ExecutorError && err.code === "not_found") {
       await finishRun(runId, {
@@ -176,6 +181,7 @@ function finishFromEvent(
  */
 async function tailUntilFinished(
   runId: mongoose.Types.ObjectId,
+  taskId: mongoose.Types.ObjectId,
   afterSeq: number
 ): Promise<void> {
   let lastSeq = afterSeq
@@ -183,7 +189,7 @@ async function tailUntilFinished(
   let attempt = 0
   while (attempt < RECONNECT_ATTEMPTS) {
     try {
-      const outcome = await tailEvents(runId, lastSeq)
+      const outcome = await tailEvents(runId, taskId, lastSeq)
       if (outcome.finished) return
       if (outcome.lastSeq > lastSeq) attempt = 0 // progress: the budget is per gap, not per run
       lastSeq = outcome.lastSeq
@@ -206,6 +212,7 @@ async function tailUntilFinished(
 
 async function tailEvents(
   runId: mongoose.Types.ObjectId,
+  taskId: mongoose.Types.ObjectId,
   afterSeq: number
 ): Promise<{ finished: boolean; lastSeq: number }> {
   let lastSeq = afterSeq
@@ -221,6 +228,14 @@ async function tailEvents(
     } catch {
       payload = { raw: msg.data }
     }
+    // The agent stored or dropped a fact for the next runs; persist it now so
+    // it survives even when this run ends badly. Applied before the event is
+    // stored: a crash in between replays the (idempotent) change on resume
+    // instead of losing it.
+    if (msg.event === "memory")
+      await applyMemoryChange(taskId, runId, payload).catch((err) =>
+        console.error("[run-task] could not apply memory change", err)
+      )
     await appendRunEvent(runId, {
       seq,
       type: msg.event,
