@@ -72,8 +72,8 @@ llm_profiles:
   # Manager: Plans and reasons about task progress
   manager:
     provider: OpenRouter
-    # model: z-ai/glm-5.3-flash:floor
-    model: deepseek/deepseek-v4-flash-0731:floor    
+    # model: z-ai/glm-5.3-flash
+    model: deepseek/deepseek-v4-flash-0731    
     temperature: 0.2
     # api_key_source: auto  # auto = saved env file first, then shell env; env = shell only; file = saved env file
     # kwargs: # optional kwargs, add api_key in kwargs if not already in .env
@@ -90,43 +90,49 @@ llm_profiles:
     #   context_window: 32768
     kwargs:
       max_tokens: 10000
-      # additional_kwargs:
-      #   extra_body:
-      #     reasoning:
-      #       enabled: false
+      additional_kwargs:
+        extra_body:
+          # Flex service tier: cheapest endpoints, higher latency, no fallback
+          service_tier: flex
+          # reasoning:
+          #   enabled: false
   
   # Executor: Selects and executes atomic actions
   executor:
     provider: OpenRouter
-    model: deepseek/deepseek-v4-flash-0731:floor
+    model: deepseek/deepseek-v4-flash-0731
     temperature: 0.1
     # api_key_source: auto
     kwargs:
       max_tokens: 10000
-      # additional_kwargs:
-      #   extra_body:
-      #     reasoning:
-      #       enabled: false
+      additional_kwargs:
+        extra_body:
+          # Flex service tier: cheapest endpoints, higher latency, no fallback
+          service_tier: flex
+          # reasoning:
+          #   enabled: false
       
   # Fast Agent: Direct execution agent (XML tool-calling or code generation)
   fast_agent:
     provider: OpenRouter
-    model: deepseek/deepseek-v4-flash-0731:floor
+    model: deepseek/deepseek-v4-flash-0731
     temperature: 0.2
     # api_key_source: auto
     # kwargs:
     #   max_tokens: 8192
     kwargs:
       max_tokens: 10000
-      # additional_kwargs:
-      #   extra_body:
-      #     reasoning:
-      #       enabled: false
+      additional_kwargs:
+        extra_body:
+          # Flex service tier: cheapest endpoints, higher latency, no fallback
+          service_tier: flex
+          # reasoning:
+          #   enabled: false
       
   # App Opener: Opens apps by name/description
   app_opener:
     provider: OpenRouter
-    model: deepseek/deepseek-v4-flash-0731:floor
+    model: deepseek/deepseek-v4-flash-0731
     temperature: 0.0
     # api_key_source: auto
     # kwargs:
@@ -135,13 +141,15 @@ llm_profiles:
       max_tokens: 10000
       additional_kwargs:
         extra_body:
+          # Flex service tier: cheapest endpoints, higher latency, no fallback
+          service_tier: flex
           reasoning:
             enabled: false
             
   # Structured Output: Extracts structured data from final answers
   structured_output:
     provider: OpenRouter
-    model: deepseek/deepseek-v4-flash-0731:floor
+    model: deepseek/deepseek-v4-flash-0731
     temperature: 0.0
     # api_key_source: auto
     # kwargs:
@@ -150,6 +158,8 @@ llm_profiles:
       max_tokens: 10000
       additional_kwargs:
         extra_body:
+          # Flex service tier: cheapest endpoints, higher latency, no fallback
+          service_tier: flex
           reasoning:
             enabled: false
             
@@ -157,7 +167,7 @@ llm_profiles:
   # Must be a vision-capable model. Remove this profile to disable see_screen.
   vision:
     provider: OpenRouter
-    model: qwen/qwen3.7-flash:floor
+    model: qwen/qwen3.7-flash
     temperature: 0.0
     # api_key_source: auto
     kwargs:
@@ -165,6 +175,8 @@ llm_profiles:
       # Disable the model's thinking phase (OpenRouter request body)
       additional_kwargs:
         extra_body:
+          # Flex service tier: cheapest endpoints, higher latency, no fallback
+          service_tier: flex
           reasoning:
             enabled: false
 
