@@ -6,7 +6,7 @@ _version: 8
 # === Agent Settings ===
 agent:
   # Maximum number of steps per task
-  max_steps: 15
+  max_steps: 100
   # Enable planning with reasoning mode
   reasoning: false
   # Enable streaming LLM responses to console in real-time
@@ -14,9 +14,9 @@ agent:
   # Use screenshots only and do not read an accessibility tree
   vision_only: false
   # Sleep duration after each action, waits for ui state to be updated (seconds)
-  after_sleep_action: 1.0
+  after_sleep_action: 2.0
   # Wait duration for UI to stabilize (seconds)
-  wait_for_stable_ui: 0.3
+  wait_for_stable_ui: 2.0
 
   # Coordinate system for swipe and state bounds output
   # false = absolute pixels (default)
@@ -72,7 +72,8 @@ llm_profiles:
   # Manager: Plans and reasons about task progress
   manager:
     provider: OpenRouter
-    model: deepseek/deepseek-v4-flash-0731:floor
+    # model: z-ai/glm-5.3-flash:floor
+    model: deepseek/deepseek-v4-flash-0731:floor    
     temperature: 0.2
     # api_key_source: auto  # auto = saved env file first, then shell env; env = shell only; file = saved env file
     # kwargs: # optional kwargs, add api_key in kwargs if not already in .env
@@ -87,15 +88,25 @@ llm_profiles:
     # kwargs:
     #   max_tokens: 2048
     #   context_window: 32768
-      
+    kwargs:
+      max_tokens: 10000
+      # additional_kwargs:
+      #   extra_body:
+      #     reasoning:
+      #       enabled: false
+  
   # Executor: Selects and executes atomic actions
   executor:
     provider: OpenRouter
     model: deepseek/deepseek-v4-flash-0731:floor
     temperature: 0.1
     # api_key_source: auto
-    # kwargs:
-    #   max_tokens: 4096
+    kwargs:
+      max_tokens: 10000
+      # additional_kwargs:
+      #   extra_body:
+      #     reasoning:
+      #       enabled: false
       
   # Fast Agent: Direct execution agent (XML tool-calling or code generation)
   fast_agent:
@@ -105,6 +116,12 @@ llm_profiles:
     # api_key_source: auto
     # kwargs:
     #   max_tokens: 8192
+    kwargs:
+      max_tokens: 10000
+      # additional_kwargs:
+      #   extra_body:
+      #     reasoning:
+      #       enabled: false
       
   # App Opener: Opens apps by name/description
   app_opener:
@@ -114,7 +131,13 @@ llm_profiles:
     # api_key_source: auto
     # kwargs:
     #   max_tokens: 512
-
+    kwargs:
+      max_tokens: 10000
+      additional_kwargs:
+        extra_body:
+          reasoning:
+            enabled: false
+            
   # Structured Output: Extracts structured data from final answers
   structured_output:
     provider: OpenRouter
@@ -123,7 +146,13 @@ llm_profiles:
     # api_key_source: auto
     # kwargs:
     #   max_tokens: 2048
-
+    kwargs:
+      max_tokens: 10000
+      additional_kwargs:
+        extra_body:
+          reasoning:
+            enabled: false
+            
   # Vision: Looks at the screen for the see_screen tool
   # Must be a vision-capable model. Remove this profile to disable see_screen.
   vision:

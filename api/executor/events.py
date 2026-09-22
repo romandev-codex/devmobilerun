@@ -10,7 +10,8 @@ TERMINAL_TYPES = frozenset({"result", "error", "cancelled"})
 class RunEvent:
     """A framework-agnostic event emitted while a run executes.
 
-    Types: started, screenshot, thought, action, plan, log, memory, result, error, cancelled.
+    Types: started, screenshot, ui_state, thought, action, plan, log, memory, result,
+    error, cancelled.
     """
 
     type: str

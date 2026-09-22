@@ -28,7 +28,7 @@ Read the current subgoal exactly as written. Look for:
 - Target elements: specific text, buttons, fields, coordinates mentioned
 - Locations: "header", "bottom", "left", "right", specific coordinates
 Convert directly to atomic action:
-- "tap/click" → click action
+- "tap/click" → click action; pass both "index" and "text" copied from the element's line in the device state (its visible text, content description or resource id). A click whose index does not carry that text is refused with the matching indices, so re-read the list and retry with the right one.
 - "swipe" → swipe action
 - "type" → type action
 - "press [system button]" → system_button action

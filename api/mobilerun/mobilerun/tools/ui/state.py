@@ -144,6 +144,55 @@ class UIState:
 
         return info
 
+    # -- label verification --------------------------------------------------
+
+    @staticmethod
+    def _norm(value: Any) -> str:
+        return " ".join(str(value or "").split()).strip("\"' ").lower()
+
+    @staticmethod
+    def element_labels(element: Dict[str, Any]) -> List[str]:
+        """Strings a model may quote for an element: text, description, resource id."""
+        labels = [
+            element.get("text"),
+            element.get("contentDescription"),
+            element.get("resourceId"),
+        ]
+        return [UIState._norm(v) for v in labels if UIState._norm(v)]
+
+    def label_matches(self, index: int, text: str) -> Optional[bool]:
+        """Whether *text* names the element at *index*.
+
+        Loose on purpose: either string may contain the other, so "Search"
+        matches "Search and explore" and "search bar" matches "Search".
+        Returns None when the index does not exist.
+        """
+        element = self.get_element(index)
+        if element is None:
+            return None
+        wanted = self._norm(text)
+        if not wanted:
+            return True
+        return any(
+            wanted in label or label in wanted
+            for label in self.element_labels(element)
+        )
+
+    def find_by_label(self, text: str) -> List[Dict[str, Any]]:
+        """Indexed elements whose labels match *text*, in list order."""
+        wanted = self._norm(text)
+        if not wanted:
+            return []
+        return [
+            el
+            for el in self._collect_all(self.elements)
+            if el.get("index") is not None
+            and any(
+                wanted in label or label in wanted
+                for label in self.element_labels(el)
+            )
+        ]
+
     def get_clear_point(self, index: int) -> Tuple[int, int]:
         """Find a tap point for *index* that avoids overlapping elements.
 

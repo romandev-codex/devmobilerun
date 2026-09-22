@@ -1,12 +1,15 @@
+import { Download } from "lucide-react"
 import { notFound } from "next/navigation"
 
 import { PageHeader } from "@/components/app/page-header"
 import { RunMeta } from "@/components/runs/run-summary"
 import { DeleteRunButton } from "@/components/runs/delete-run-button"
 import { RunTimeline } from "@/components/runs/run-timeline"
+import { buttonVariants } from "@/components/ui/button"
 import { ApiError } from "@/lib/api/errors"
 import { deviceLabel, getDevice } from "@/lib/devices"
 import { getRun, isTerminal, listRunEvents } from "@/lib/runs/service"
+import { cn } from "@/lib/utils"
 
 export const dynamic = "force-dynamic"
 
@@ -73,9 +76,25 @@ export default async function RunPage({
               </div>
             </details>
           ) : null}
-          {isTerminal(run.status) ? (
-            <DeleteRunButton runId={run.id} taskId={run.taskId} />
-          ) : null}
+          <div className="grid gap-2">
+            <a
+              href={`/api/runs/${run.id}/export`}
+              download
+              className={cn(
+                buttonVariants({ variant: "outline", size: "sm" }),
+                "justify-self-start"
+              )}
+            >
+              <Download className="size-3" /> Export log (txt)
+            </a>
+            <p className="text-xs text-muted-foreground">
+              Plain-text transcript with the elements the agent saw at each
+              step.
+            </p>
+            {isTerminal(run.status) ? (
+              <DeleteRunButton runId={run.id} taskId={run.taskId} />
+            ) : null}
+          </div>
         </aside>
       </div>
     </div>

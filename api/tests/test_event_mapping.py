@@ -7,7 +7,11 @@ from executor.framework import map_framework_event
 
 def test_maps_screenshot_thought_action_and_ignores_unknown():
     from llama_index.core.workflow import Event
-    from mobilerun.agent.common.events import ScreenshotEvent, ToolExecutionEvent
+    from mobilerun.agent.common.events import (
+        RecordUIStateEvent,
+        ScreenshotEvent,
+        ToolExecutionEvent,
+    )
     from mobilerun.agent.fast_agent.events import FastAgentResponseEvent
     from mobilerun.agent.manager.events import ManagerPlanDetailsEvent
 
@@ -17,6 +21,11 @@ def test_maps_screenshot_thought_action_and_ignores_unknown():
     assert shot.payload["step"] == 0
     assert base64.b64decode(shot.payload["png"]) == b"png-bytes"
     assert map_framework_event(ScreenshotEvent(screenshot=b"x"), counter).payload["step"] == 1
+
+    elements = [{"index": 3, "className": "FrameLayout", "text": "", "bounds": "0,0,10,10", "children": []}]
+    state = map_framework_event(RecordUIStateEvent(ui_state=elements), counter)
+    assert state.type == "ui_state"
+    assert state.payload == {"step": 1, "elements": elements}
 
     thought = map_framework_event(
         FastAgentResponseEvent(thought="Tap the button", code="tap(3)"), counter

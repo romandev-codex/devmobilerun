@@ -183,7 +183,11 @@ def map_framework_event(event: Any, step_counter: list[int]) -> RunEvent | None:
     ``step_counter`` is a one-element list holding the running screenshot index;
     the caller owns it so the mapper needs no state of its own.
     """
-    from mobilerun.agent.common.events import ScreenshotEvent, ToolExecutionEvent
+    from mobilerun.agent.common.events import (
+        RecordUIStateEvent,
+        ScreenshotEvent,
+        ToolExecutionEvent,
+    )
     from mobilerun.agent.droid.events import FastAgentResultEvent, FinalizeEvent
     from mobilerun.agent.executor.events import ExecutorActionEvent
     from mobilerun.agent.fast_agent.events import FastAgentEndEvent, FastAgentResponseEvent
@@ -195,6 +199,14 @@ def map_framework_event(event: Any, step_counter: list[int]) -> RunEvent | None:
         return RunEvent(
             "screenshot",
             {"step": step, "png": base64.b64encode(event.screenshot).decode("ascii")},
+        )
+    if isinstance(event, RecordUIStateEvent):
+        # The indexed element tree the agent picks `click(index)` targets from.
+        # It follows the step's screenshot, so it belongs to the last step
+        # counted; kept so a run export shows what index N resolved to.
+        return RunEvent(
+            "ui_state",
+            {"step": max(step_counter[0] - 1, 0), "elements": _jsonable(event.ui_state)},
         )
     if isinstance(event, FastAgentResponseEvent):
         return RunEvent("thought", {"text": event.thought, "code": event.code, "source": "fast_agent"})
