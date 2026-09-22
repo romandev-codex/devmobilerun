@@ -11,6 +11,16 @@ export type DeviceView = {
   cooldownUntil: string | null
 }
 
+/** One live battery temperature reading, as returned by the thermal route. */
+export type DeviceTemperatureView = {
+  serial: string
+  /** °C, or null when the device reports no usable sensor. */
+  temperatureC: number | null
+  /** The configured maximum; 0 when the check is disabled. */
+  limitC: number
+  readAt: string
+}
+
 export function deviceLabel(
   d: Pick<DeviceView, "displayName" | "model" | "serial">
 ): string {

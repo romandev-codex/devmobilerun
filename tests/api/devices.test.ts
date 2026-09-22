@@ -8,11 +8,18 @@ import {
 
 let fake: FakeExecutor
 let devices: { serial: string; state: string; model: string | null }[] = []
+let thermal: { status: number; body: unknown } = {
+  status: 200,
+  body: { temperatureC: 33.4 },
+}
 
 beforeAll(async () => {
   fake = await startFakeExecutor()
   useFakeExecutor(fake)
   fake.on("GET", "/devices", (_req, _res, { json }) => json(devices))
+  fake.on("GET", "/devices/:serial/thermal", (_req, _res, { json }) =>
+    json(thermal.body, thermal.status)
+  )
 })
 
 afterAll(() => fake.close())
@@ -119,5 +126,43 @@ describe("devices", () => {
     } finally {
       process.env.EXECUTOR_URL = previous
     }
+  })
+})
+
+describe("device temperature", () => {
+  async function readViaRoute(serial: string) {
+    const { GET } = await import("@/app/api/devices/[serial]/thermal/route")
+    const res = await GET(
+      new Request(`http://app/api/devices/${serial}/thermal`),
+      { params: Promise.resolve({ serial }) }
+    )
+    return { status: res.status, body: await res.json() }
+  }
+
+  it("takes a fresh reading and stores it on the device", async () => {
+    devices = [{ serial: "emulator-5554", state: "device", model: "sdk" }]
+    await listViaRoute()
+    thermal = { status: 200, body: { temperatureC: 33.4 } }
+    const { status, body } = await readViaRoute("emulator-5554")
+    expect(status).toBe(200)
+    expect(body).toMatchObject({
+      serial: "emulator-5554",
+      temperatureC: 33.4,
+      limitC: 42,
+    })
+    expect(typeof body.readAt).toBe("string")
+    const { Device } = await import("@/lib/models/device")
+    const doc = await Device.findOne({ serial: "emulator-5554" }).lean()
+    expect(doc!.lastTemperatureC).toBe(33.4)
+  })
+
+  it("reports a device the executor does not list as not found", async () => {
+    thermal = {
+      status: 404,
+      body: { error: { code: "device_not_found", message: "gone" } },
+    }
+    const { status, body } = await readViaRoute("ghost")
+    expect(status).toBe(404)
+    expect(body.error.code).toBe("not_found")
   })
 })

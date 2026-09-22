@@ -4,7 +4,9 @@ import { PageHeader } from "@/components/app/page-header"
 import { DeviceStateBadge } from "@/components/devices/device-card"
 import { DeviceNameEditor } from "@/components/devices/device-name-editor"
 import { DeviceScreen } from "@/components/devices/device-screen"
+import { DeviceTemperature } from "@/components/devices/device-temperature"
 import { ApiError } from "@/lib/api/errors"
+import { readDeviceTemperature } from "@/lib/device-thermal"
 import { deviceLabel, getDevice } from "@/lib/devices"
 import { listRuns } from "@/lib/runs/service"
 import { getSettings } from "@/lib/settings"
@@ -25,12 +27,14 @@ export default async function DevicePage({
     }),
     getSettings(),
   ])
-  const history = await listRuns({ deviceSerial: device.serial, limit: 20 })
-  // Rendered on the server per request, so the clock is read once here.
-  const coolingUntil =
-    device.cooldownUntil && new Date(device.cooldownUntil) > new Date()
-      ? new Date(device.cooldownUntil)
-      : null
+  const [history, temperature] = await Promise.all([
+    listRuns({ deviceSerial: device.serial, limit: 20 }),
+    // A fresh reading for the page; when it cannot be taken the client
+    // component retries and shows why.
+    device.online
+      ? readDeviceTemperature(device.serial).catch(() => null)
+      : Promise.resolve(null),
+  ])
   return (
     <div>
       <PageHeader
@@ -70,15 +74,22 @@ export default async function DevicePage({
             </dd>
             <dt className="text-muted-foreground">Battery temperature</dt>
             <dd>
-              {device.lastTemperatureC != null
-                ? `${device.lastTemperatureC.toFixed(1)} °C`
-                : "not read yet"}
-              {coolingUntil ? (
-                <span className="ml-2 text-destructive">
-                  too hot, cooling down until{" "}
-                  {coolingUntil.toLocaleTimeString()}
-                </span>
-              ) : null}
+              <DeviceTemperature
+                serial={device.serial}
+                online={device.online}
+                initial={
+                  temperature ??
+                  (device.lastTemperatureC != null
+                    ? {
+                        serial: device.serial,
+                        temperatureC: device.lastTemperatureC,
+                        limitC: settings.maxDeviceTemperatureC,
+                        readAt: device.lastSeenAt ?? new Date(0).toISOString(),
+                      }
+                    : null)
+                }
+                cooldownUntil={device.cooldownUntil}
+              />
             </dd>
           </dl>
         </div>

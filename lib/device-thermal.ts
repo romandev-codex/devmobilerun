@@ -1,6 +1,35 @@
-import { executor } from "@/lib/executor/client"
+import { notFound } from "@/lib/api/errors"
+import type { DeviceTemperatureView } from "@/lib/device-view"
+import { executor, ExecutorError } from "@/lib/executor/client"
 import { Device } from "@/lib/models/device"
-import type { SettingsView } from "@/lib/settings"
+import { getSettings, type SettingsView } from "@/lib/settings"
+
+/**
+ * Takes a fresh battery temperature reading for the device page and stores it
+ * on the device. Executor failures propagate (the route maps them to errors);
+ * a device the executor no longer lists is reported as not found.
+ */
+export async function readDeviceTemperature(
+  serial: string
+): Promise<DeviceTemperatureView> {
+  const settings = await getSettings()
+  let temperatureC: number | null
+  try {
+    temperatureC = (await executor.deviceThermal(serial)).temperatureC
+  } catch (err) {
+    if (err instanceof ExecutorError && err.code === "not_found")
+      throw notFound("Device")
+    throw err
+  }
+  const readAt = new Date()
+  await Device.updateOne({ serial }, { $set: { lastTemperatureC: temperatureC } })
+  return {
+    serial,
+    temperatureC,
+    limitC: settings.maxDeviceTemperatureC,
+    readAt: readAt.toISOString(),
+  }
+}
 
 export type ThermalVerdict =
   | { tooHot: false; temperatureC: number | null }
