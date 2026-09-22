@@ -6,9 +6,26 @@ from ..helpers.coordinate import bounds_to_normalized
 from ..helpers.geometry import rects_overlap
 from .base import TreeFormatter
 
+# Raw Portal flags that make a node a real target for index-based actions.
+INTERACTIVE_FLAGS = (
+    "isClickable",
+    "isLongClickable",
+    "isCheckable",
+    "isEditable",
+    "isFocusable",
+    "isScrollable",
+)
+
 
 class IndexedFormatter(TreeFormatter):
-    """Format tree in the standard Mobilerun format."""
+    """Format tree in the standard Mobilerun format.
+
+    Only nodes a model can meaningfully act on receive an index: nodes with an
+    interactive flag, visible text or a content description. Bare layout
+    containers (an unlabeled FrameLayout or ViewGroup) are left out of the
+    list so it stays short and off-by-one index mistakes stay rare. Their
+    bounds still take part in tap-obstruction checks.
+    """
 
     def __init__(self):
         self.screen_width: Optional[int] = None
@@ -30,6 +47,13 @@ class IndexedFormatter(TreeFormatter):
             a11y_tree = []
         else:
             a11y_tree = self._flatten_with_index(filtered_tree, [1])
+            if not a11y_tree:
+                # A source that reports no flags and no text at all (an
+                # unexpected tree shape) still gets the full indexed list
+                # rather than nothing to act on.
+                a11y_tree = self._flatten_with_index(
+                    filtered_tree, [1], index_all=True
+                )
 
         phone_state_text = self._format_phone_state(phone_state)
         ui_elements_text = self._format_ui_elements_text(a11y_tree)
@@ -158,25 +182,46 @@ class IndexedFormatter(TreeFormatter):
 
         return "\n".join(formatted_lines)
 
+    @staticmethod
+    def is_indexable(node: Dict[str, Any]) -> bool:
+        """Whether a raw node deserves an index in the model-facing list."""
+        if any(node.get(flag) for flag in INTERACTIVE_FLAGS):
+            return True
+        return bool(
+            str(node.get("text") or "").strip()
+            or str(node.get("contentDescription") or "").strip()
+        )
+
     def _flatten_with_index(
-        self, node: Dict[str, Any], counter: List[int]
+        self, node: Dict[str, Any], counter: List[int], index_all: bool = False
     ) -> List[Dict[str, Any]]:
         """Recursively flatten tree with index assignment."""
-        results = []
+        return self._flatten(node, counter, index_all)[1]
 
-        formatted = self._format_node(node, counter[0])
-        results.append(formatted)
-        counter[0] += 1
+    def _flatten(
+        self, node: Dict[str, Any], counter: List[int], index_all: bool
+    ) -> Tuple[Dict[str, Any], List[Dict[str, Any]]]:
+        """Returns the node's own formatted form and the indexed descendants.
+
+        The formatted form is returned even for nodes that get no index so a
+        skipped container still counts as a touch obstruction for siblings.
+        """
+        results = []
+        include = index_all or self.is_indexable(node)
+        formatted = self._format_node(node, counter[0] if include else None)
+        if include:
+            results.append(formatted)
+            counter[0] += 1
 
         siblings = []
         for child in node.get("children", []):
-            descendants = self._flatten_with_index(child, counter)
-            siblings.append((child, descendants[0]))
+            child_formatted, descendants = self._flatten(child, counter, index_all)
+            siblings.append((child, child_formatted))
             results.extend(descendants)
 
         self._add_tap_blockers(siblings)
 
-        return results
+        return formatted, results
 
     @staticmethod
     def _add_tap_blockers(
@@ -211,7 +256,9 @@ class IndexedFormatter(TreeFormatter):
             if blockers:
                 formatted["tapBlockers"] = blockers
 
-    def _format_node(self, node: Dict[str, Any], index: int) -> Dict[str, Any]:
+    def _format_node(
+        self, node: Dict[str, Any], index: Optional[int]
+    ) -> Dict[str, Any]:
         """Format single node to Mobilerun format."""
         bounds = node.get("boundsInScreen", {})
         bounds_str = f"{bounds.get('left', 0)},{bounds.get('top', 0)},{bounds.get('right', 0)},{bounds.get('bottom', 0)}"

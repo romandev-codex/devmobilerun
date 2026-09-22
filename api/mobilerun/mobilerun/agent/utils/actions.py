@@ -7,7 +7,7 @@ interacts with the device via ``ctx.driver``, resolves UI elements via
 
 import asyncio
 import logging
-from typing import TYPE_CHECKING, List
+from typing import TYPE_CHECKING, List, Optional
 
 if TYPE_CHECKING:
     from mobilerun.agent.action_context import ActionContext
@@ -213,9 +213,61 @@ def _record_driver_log_delta(
         _record_macro_action(ctx, dict(raw_action), pre_ui=pre_ui)
 
 
-async def click(index: int, *, ctx: "ActionContext") -> ActionResult:
-    """Click the element with the given index."""
+def _describe_element(element: dict) -> str:
+    text = element.get("text") or ""
+    resource_id = element.get("resourceId") or ""
+    cls = element.get("className") or "?"
+    label = f"'{text}'" if text else "no text"
+    if resource_id and resource_id != text:
+        label += f", id '{resource_id}'"
+    return f"{cls} ({label})"
+
+
+def _verify_target(ctx: "ActionContext", index: int, text: Optional[str]) -> Optional[str]:
+    """Refuses an index whose element does not carry the text the model named.
+
+    The model reads a numbered list and often names the right element while
+    sending a neighbouring number. With the label the tap is checked before
+    the device is touched; a mismatch returns the reason and the indices that
+    do match, so the next call lands right. Returns None when the tap may go
+    ahead: no text given, the state cannot verify, or the label matches.
+    """
+    if text is None or not str(text).strip():
+        return None
+    ui = getattr(ctx, "ui", None)
+    if ui is None or not hasattr(ui, "label_matches"):
+        return None
+    matched = ui.label_matches(index, str(text))
+    if matched is None or matched:
+        return None  # a missing index fails later with the usual message
+    element = ui.get_element(index) or {}
+    candidates = ui.find_by_label(str(text))
+    if candidates:
+        listing = ", ".join(
+            f"{c.get('index')} ({_describe_element(c)})" for c in candidates[:5]
+        )
+        hint = f"Elements matching '{text}': {listing}."
+    else:
+        hint = f"No element in the current ui_state matches '{text}'."
+    return (
+        f"Refused: index {index} is {_describe_element(element)}, "
+        f"not '{text}'. {hint} Re-read the ui_state and call again with the "
+        "index whose line carries that text."
+    )
+
+
+async def click(
+    index: int, text: Optional[str] = None, *, ctx: "ActionContext"
+) -> ActionResult:
+    """Click the element with the given index.
+
+    ``text`` is the label of the intended element as it appears in the
+    ui_state; when given, the tap is refused if the index does not carry it.
+    """
     try:
+        refusal = _verify_target(ctx, index, text)
+        if refusal:
+            return ActionResult(success=False, summary=refusal)
         pre_ui = await _macro_pre_ui(ctx)
         x, y = ctx.ui.get_element_coords(index)
         await ctx.driver.tap(x, y)
@@ -244,9 +296,14 @@ async def click(index: int, *, ctx: "ActionContext") -> ActionResult:
         )
 
 
-async def long_press(index: int, *, ctx: "ActionContext") -> ActionResult:
-    """Long press the element with the given index."""
+async def long_press(
+    index: int, text: Optional[str] = None, *, ctx: "ActionContext"
+) -> ActionResult:
+    """Long press the element with the given index (``text`` as in ``click``)."""
     try:
+        refusal = _verify_target(ctx, index, text)
+        if refusal:
+            return ActionResult(success=False, summary=refusal)
         pre_ui = await _macro_pre_ui(ctx)
         x, y = ctx.ui.get_element_coords(index)
         await ctx.driver.swipe(x, y, x, y, 1000)

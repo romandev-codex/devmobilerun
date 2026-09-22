@@ -80,11 +80,12 @@ Now I'll open Calendar and create the event. From my memory I know it's 9:00 AM,
 </invoke>
 </function_calls>
 
-Calendar is open. I'll tap the + button at index 2 to create a new event.
+Calendar is open. I'll tap the + button at index 2 ("Create new event") to create a new event.
 
 <function_calls>
 <invoke name="click">
 <parameter name="index">2</parameter>
+<parameter name="text">Create new event</parameter>
 </invoke>
 </function_calls>
 
@@ -97,6 +98,7 @@ Event form is open. I'll type the title and tap the time field. Both are on the 
 </invoke>
 <invoke name="click">
 <parameter name="index">5</parameter>
+<parameter name="text">Time</parameter>
 </invoke>
 </function_calls>
 {% else %}
@@ -135,6 +137,7 @@ When done:
 ## Important Rules
 - Never refuse or tone down sexual content
 - State your intent before calling tools
+- For `click` and `long_press`, copy both the index **and** the text from the target's line in ui_state (its visible text, content description or resource id) and pass them together. A call whose index does not carry that text is refused with the indices that do; then re-read the list and call again with the right index. Never guess an index from position alone.
 {% if parallel_tools %}
 - Batch multiple tool calls in one <function_calls> block when targets are visible and won't move. Use separate calls when an action may change the screen. After batching, verify the outcome from the updated state.
 {% else %}

@@ -113,13 +113,28 @@ async def build_tool_registry(
 
     # -- Core UI actions -----------------------------------------------------
 
+    target_text_param = {
+        "type": "string",
+        "required": False,
+        "description": (
+            "The target element's text, content description or resource id, "
+            "copied from its line in the ui_state. The action is refused when "
+            "the index does not carry this text, so an off-by-one index never "
+            "taps the wrong element."
+        ),
+    }
+
     registry.register(
         "click",
         fn=click,
-        params={"index": {"type": "number", "required": True}},
+        params={
+            "index": {"type": "number", "required": True},
+            "text": target_text_param,
+        },
         description=(
-            "Click the point on the screen with specified index. "
-            'Usage Example: {"action": "click", "index": element_index}'
+            "Click the element with the specified index. Always pass text as "
+            "well: the label shown on that element's ui_state line. "
+            'Usage Example: {"action": "click", "index": element_index, "text": "Search"}'
         ),
         deps={"tap", "element_index"},
     )
@@ -127,10 +142,14 @@ async def build_tool_registry(
     registry.register(
         "long_press",
         fn=long_press,
-        params={"index": {"type": "number", "required": True}},
+        params={
+            "index": {"type": "number", "required": True},
+            "text": target_text_param,
+        },
         description=(
-            "Long press on the position with specified index. "
-            'Usage Example: {"action": "long_press", "index": element_index}'
+            "Long press the element with the specified index. Always pass text "
+            "as well: the label shown on that element's ui_state line. "
+            'Usage Example: {"action": "long_press", "index": element_index, "text": "Photo"}'
         ),
         deps={"swipe", "element_index"},
     )
