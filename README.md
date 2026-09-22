@@ -100,7 +100,7 @@ npm run check                   # typecheck + lint + both test suites
 1. "Run now" (or a schedule tick) creates a run document and enqueues an Agenda job.
 2. The job takes the device lock, opens the start URL on the phone through an adb intent, starts the agent on the
    executor with the composed instruction, per-task options, variables and memory, plus the global prompt
-   overrides and app cards from Settings.
+   overrides from Settings and the app cards from App cards.
 3. The executor streams events (thoughts, actions, plans, per-step screenshots, memory changes, result) which the
    job writes to MongoDB; step images go to GridFS and are pruned per the retention setting.
 4. Task memory is the key/value facts a task keeps between runs (Memory tab on the task page). The agent sees

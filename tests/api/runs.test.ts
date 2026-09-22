@@ -515,15 +515,18 @@ describe("global prompts and app cards", () => {
     await settings.PATCH(
       new Request("http://app/x", {
         method: "PATCH",
+        ...json({ prompts: { manager_system: "Be terse." } }),
+      }),
+      {}
+    )
+    const appCards = await import("@/app/api/app-cards/route")
+    await appCards.POST(
+      new Request("http://app/x", {
+        method: "POST",
         ...json({
-          prompts: { manager_system: "Be terse." },
-          appCards: [
-            {
-              packageName: "com.example.app",
-              name: "Ex",
-              content: "Tap login",
-            },
-          ],
+          packageName: "com.example.app",
+          name: "Ex",
+          content: "Tap login",
         }),
       }),
       {}

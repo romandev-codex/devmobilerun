@@ -121,7 +121,8 @@ The user opens the app, sees every connected phone with a live-ish screenshot, c
 - `runs`: `{taskId, scheduleId?, deviceSerial, status, trigger: manual|schedule, instruction (composed), startUrl?, options, variables, startedAt?, finishedAt?, result?: {success, reason, steps}, error?, skipReason?, createdAt}`.
 - `runEvents`: `{runId, seq, type, at, payload}` where screenshot payloads hold a GridFS file id instead of bytes.
 - `screenshots.files` / `screenshots.chunks`: GridFS bucket for step images, metadata `{runId, seq}`.
-- `settings` (singleton): `{screenshotIntervalMs, screenshotRetentionRuns, prompts: {role: template}, appCards: [...]}`.
+- `settings` (singleton): `{screenshotIntervalMs, screenshotRetentionRuns, prompts: {role: template}}`.
+- `appcards`: `{packageName (unique), name, content, createdAt, updatedAt}`; sent with every run and snapshotted on the run.
 
 ### Run state machine
 ```
@@ -151,7 +152,8 @@ queued ──▶ running ──▶ succeeded
 - `/tasks` table; `/tasks/new` and `/tasks/[id]` form (start, goal, end, options, variables) with Run now and history tab.
 - `/schedules` table with enable toggle, next fire, run count; create/edit dialog.
 - `/runs/[id]` timeline: events on one side, current/selected step screenshot on the other, Stop button while running, result banner when done.
-- `/settings` model info (read-only), executor health, screenshot interval, retention, prompt overrides, app cards.
+- `/app-cards` table; `/app-cards/new` and `/app-cards/[id]` form (package name, display name, guidance).
+- `/settings` model info (read-only), executor health, screenshot interval, retention, prompt overrides.
 
 ## Testing Decisions
 

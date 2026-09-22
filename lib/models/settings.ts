@@ -4,15 +4,6 @@ export const SETTINGS_ID = "global"
 
 export { PROMPT_ROLES, type PromptRole } from "@/lib/prompt-roles"
 
-const appCardSchema = new Schema(
-  {
-    packageName: { type: String, required: true },
-    name: { type: String, default: "" },
-    content: { type: String, required: true },
-  },
-  { _id: false }
-)
-
 const settingsSchema = new Schema(
   {
     _id: { type: String, default: SETTINGS_ID },
@@ -20,7 +11,6 @@ const settingsSchema = new Schema(
     screenshotRetentionRuns: { type: Number, required: true, default: 20 },
     /** Jinja2 templates keyed by prompt role; empty means use the framework default. */
     prompts: { type: Schema.Types.Mixed, default: {} },
-    appCards: { type: [appCardSchema], default: [] },
   },
   { timestamps: true }
 )

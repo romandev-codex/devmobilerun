@@ -1,6 +1,7 @@
 import type mongoose from "mongoose"
 import { setTimeout as sleep } from "node:timers/promises"
 
+import { appCardsForRun } from "@/lib/app-cards"
 import { connectDb } from "@/lib/db"
 import { executor, ExecutorError } from "@/lib/executor/client"
 import { Run } from "@/lib/models/run"
@@ -56,15 +57,16 @@ export async function executeRun(runId: string): Promise<void> {
     return
   }
 
-  const [settings, memory] = await Promise.all([
+  const [settings, appCards, memory] = await Promise.all([
     getSettings(),
+    appCardsForRun(),
     taskMemoryMap(run.taskId),
   ])
   const started = await transitionRun(run._id, "queued", {
     status: "running",
     startedAt: new Date(),
     prompts: settings.prompts,
-    appCards: settings.appCards,
+    appCards,
   })
   if (!started) {
     // Stopped between the read above and this write; the stop released nothing yet.
@@ -81,7 +83,7 @@ export async function executeRun(runId: string): Promise<void> {
       options: run.options,
       variables: (run.variables as Record<string, string>) ?? {},
       prompts: settings.prompts,
-      appCards: settings.appCards,
+      appCards,
       memory,
     })
     await tailUntilFinished(run._id, run.taskId, -1)

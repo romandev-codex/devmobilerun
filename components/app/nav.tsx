@@ -3,6 +3,7 @@
 import Link from "next/link"
 import { usePathname } from "next/navigation"
 import {
+  BookText,
   CalendarClock,
   ListChecks,
   Play,
@@ -17,6 +18,7 @@ const items = [
   { href: "/tasks", label: "Tasks", icon: ListChecks },
   { href: "/schedules", label: "Schedules", icon: CalendarClock },
   { href: "/runs", label: "Runs", icon: Play },
+  { href: "/app-cards", label: "App cards", icon: BookText },
   { href: "/settings", label: "Settings", icon: Settings },
 ]
 

@@ -27,7 +27,6 @@ describe("settings", () => {
       screenshotIntervalMs: 2000,
       screenshotRetentionRuns: 20,
       prompts: {},
-      appCards: [],
     })
   })
 
@@ -49,46 +48,13 @@ describe("settings", () => {
     expect(empty.body.error.code).toBe("validation_error")
   })
 
-  it("stores prompt overrides and app cards with validation", async () => {
+  it("stores prompt overrides with validation", async () => {
     const ok = await patch({
       prompts: { manager_system: "Be terse.", executor_system: "" },
-      appCards: [
-        {
-          packageName: "com.example.app",
-          name: "Example",
-          content: "Tap login first",
-        },
-      ],
     })
     expect(ok.status).toBe(200)
     expect(ok.body.settings.prompts).toEqual({ manager_system: "Be terse." })
-    expect(ok.body.settings.appCards).toEqual([
-      {
-        packageName: "com.example.app",
-        name: "Example",
-        content: "Tap login first",
-      },
-    ])
 
     expect((await patch({ prompts: { bogus_role: "x" } })).status).toBe(400)
-    expect(
-      (
-        await patch({
-          appCards: [{ packageName: "not a package", content: "x" }],
-        })
-      ).status
-    ).toBe(400)
-    expect(
-      (await patch({ appCards: [{ packageName: "com.a.b", content: "" }] }))
-        .status
-    ).toBe(400)
-    const dupe = await patch({
-      appCards: [
-        { packageName: "com.a.b", content: "x" },
-        { packageName: "com.a.b", content: "y" },
-      ],
-    })
-    expect(dupe.status).toBe(400)
-    expect(dupe.body.error.message).toContain("Duplicate")
   })
 })
