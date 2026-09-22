@@ -109,8 +109,8 @@ llm_profiles:
         extra_body:
           # Flex service tier: cheapest endpoints, higher latency, no fallback
           service_tier: flex
-          # reasoning:
-          #   enabled: false
+          reasoning:
+            enabled: false
       
   # Fast Agent: Direct execution agent (XML tool-calling or code generation)
   fast_agent:
@@ -125,9 +125,9 @@ llm_profiles:
       additional_kwargs:
         extra_body:
           # Flex service tier: cheapest endpoints, higher latency, no fallback
-          service_tier: flex
-          # reasoning:
-          #   enabled: false
+          # service_tier: flex
+          reasoning:
+            enabled: false
       
   # App Opener: Opens apps by name/description
   app_opener:
