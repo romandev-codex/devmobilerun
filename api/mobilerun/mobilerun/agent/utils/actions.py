@@ -533,6 +533,25 @@ async def system_button(button: str, *, ctx: "ActionContext") -> ActionResult:
         )
 
 
+def _as_point(value) -> list[int | float] | None:
+    """Numeric [x, y] from a model-supplied pair; models sometimes quote the numbers."""
+    if not isinstance(value, (list, tuple)) or len(value) != 2:
+        return None
+    point = []
+    for v in value:
+        if isinstance(v, bool):
+            return None
+        if isinstance(v, str):
+            try:
+                v = float(v.strip())
+            except ValueError:
+                return None
+        if not isinstance(v, (int, float)):
+            return None
+        point.append(int(v) if float(v).is_integer() else v)
+    return point
+
+
 async def swipe(
     coordinate: List[int],
     coordinate2: List[int],
@@ -541,16 +560,19 @@ async def swipe(
     ctx: "ActionContext",
 ) -> ActionResult:
     """Swipe from one coordinate to another."""
-    if not isinstance(coordinate, list) or len(coordinate) != 2:
+    start = _as_point(coordinate)
+    if start is None:
         return ActionResult(
             success=False,
-            summary=f"Failed: coordinate must be a list of 2 integers, got: {coordinate}",
+            summary=f"Failed: coordinate must be a list of 2 numbers like [540, 1500], got: {coordinate!r}",
         )
-    if not isinstance(coordinate2, list) or len(coordinate2) != 2:
+    end = _as_point(coordinate2)
+    if end is None:
         return ActionResult(
             success=False,
-            summary=f"Failed: coordinate2 must be a list of 2 integers, got: {coordinate2}",
+            summary=f"Failed: coordinate2 must be a list of 2 numbers like [540, 500], got: {coordinate2!r}",
         )
+    coordinate, coordinate2 = start, end
 
     try:
         pre_ui = await _macro_pre_ui(ctx)

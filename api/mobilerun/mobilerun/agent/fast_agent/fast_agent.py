@@ -32,6 +32,7 @@ from mobilerun.agent.fast_agent.events import (
     FastAgentToolCallEvent,
 )
 from mobilerun.agent.fast_agent.history import window_history
+from mobilerun.agent.fast_agent.repeat_guard import RepeatGuard, screen_fingerprint
 from mobilerun.agent.fast_agent.xml_parser import (
     ToolCallParseStatus,
     ToolResult,
@@ -127,6 +128,7 @@ class FastAgent(Workflow):
         self.system_prompt: ChatMessage | None = None
         self.tool_call_counter = 0
         self._consecutive_malformed_tool_calls = 0
+        self._repeat_guard = RepeatGuard()
 
         # Build tool descriptions and param types from registry
         self.tool_descriptions = self.registry.get_tool_descriptions_xml()
@@ -200,6 +202,7 @@ class FastAgent(Workflow):
         """Initialize message history with goal."""
         logger.debug("Preparing chat for task execution...")
         self._consecutive_malformed_tool_calls = 0
+        self._repeat_guard.reset()
 
         # Get available secrets (only if type_secret is actually in the registry)
         if (
@@ -523,6 +526,7 @@ class FastAgent(Workflow):
             return event
 
         results: list[ToolResult] = []
+        screen = screen_fingerprint(self.shared_state.formatted_device_state)
 
         for call in tool_calls:
             logger.debug(f"Executing: {call.name}({call.parameters})")
@@ -539,10 +543,17 @@ class FastAgent(Workflow):
                 action_result = await self.registry.execute(
                     call.name, call.parameters, self.action_ctx, workflow_ctx=ctx
                 )
+            verdict = self._repeat_guard.record(
+                call.name, call.parameters, screen, action_result.success
+            )
+            output = action_result.summary
+            if verdict.note:
+                logger.warning(f"🔁 {verdict.note}")
+                output = f"{output}\n\nWARNING: {verdict.note}"
             results.append(
                 ToolResult(
                     name=call.name,
-                    output=action_result.summary,
+                    output=output,
                     is_error=not action_result.success,
                 )
             )
@@ -579,6 +590,16 @@ class FastAgent(Workflow):
                 event = FastAgentEndEvent(
                     success=success,
                     reason=reason,
+                    tool_call_count=self.tool_call_counter,
+                )
+                ctx.write_event_to_stream(event)
+                return event
+
+            if verdict.stop_reason:
+                logger.warning(f"🛑 {verdict.stop_reason}")
+                event = FastAgentEndEvent(
+                    success=False,
+                    reason=verdict.stop_reason,
                     tool_call_count=self.tool_call_counter,
                 )
                 ctx.write_event_to_stream(event)
