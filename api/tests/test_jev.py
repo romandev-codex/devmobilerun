@@ -3,11 +3,13 @@
 from __future__ import annotations
 
 import copy
+import json
 from typing import Any, Callable
 
 import pytest
 
 from executor.framework import RunSpec
+from executor.jev.advisor import Advisor
 from executor.jev.device import JevDevice
 from executor.jev.policy import (
     PolicyError,
@@ -126,15 +128,16 @@ def pick(criteria: dict[str, Any], text: str) -> str:
 class ScriptedJev:
     """Answers each request with the next scripted (operation, target text) step."""
 
-    def __init__(self, script: list[tuple[str, str | None]]):
+    def __init__(self, script: list[tuple[str, str | None]], confidence: float = 0.9):
         self.script = list(script)
+        self.confidence = confidence
         self.bodies: list[dict[str, Any]] = []
 
     async def __call__(self, body: dict[str, Any]) -> dict[str, Any]:
         self.bodies.append(body)
         operation, target = self.script.pop(0)
         questions = body["questions"]
-        answers = {"operation": answer(questions["operation"]["criteria"], operation)}
+        answers = {"operation": answer(questions["operation"]["criteria"], operation, self.confidence)}
         head = {"TAP": "tap_target", "OPEN_APP": "app_target", "TYPE_TEXT": "text_value"}.get(operation)
         if operation.startswith("SCROLL_"):
             head = "scroll_target"
@@ -150,12 +153,13 @@ def spec(**overrides) -> RunSpec:
     return RunSpec(**base)
 
 
-async def run_session(driver: FakeDriver, jev: ScriptedJev, **spec_overrides) -> list:
+async def run_session(driver: FakeDriver, jev: ScriptedJev, advisor=None, **spec_overrides) -> list:
     agent = JevAgentRun(
         spec(**spec_overrides),
         config=JevConfig(api_key="k", model="jev-latest"),
         device=JevDevice(driver, SERIAL),
         transport=jev,
+        advisor=advisor,
         sleep=_no_sleep,
     )
     return [e async for e in agent.events()]
@@ -432,6 +436,91 @@ async def test_session_repeats_an_action_on_a_screen_it_returns_to():
     events = await run_session(driver, jev)
     assert driver.actions == [("tap", 270, 200), ("button", "back"), ("tap", 270, 200)]
     assert events[-1].payload["success"] is True
+
+
+async def test_session_stops_offering_a_tap_repeated_on_the_same_screen_and_marks_it_tapped():
+    comments = raw_state(
+        node((0, 100, 1080, 300), text="micheleragaglia", isClickable=True),
+        node((0, 300, 1080, 2000), text="comments", isScrollable=True),
+        package="com.example.social",
+    )
+    profile = raw_state(node((0, 0, 1080, 200), text="Profile"), package="com.example.social")
+
+    def navigate(driver: FakeDriver, action: tuple) -> None:
+        driver.state = profile if action[0] == "tap" else comments
+
+    driver = FakeDriver(comments, navigate)
+    jev = ScriptedJev(
+        [("TAP", "micheleragaglia"), ("BACK", None), ("TAP", "micheleragaglia"), ("BACK", None),
+         ("SCROLL_DOWN", "comments"), ("DONE", None)]
+    )  # fmt: skip
+    await run_session(driver, jev, max_steps=10)
+    first, second, third = (jev.bodies[i]["questions"] for i in (0, 2, 4))
+    assert first["tap_target"]["criteria"] == {"1": "[1] micheleragaglia"}
+    assert second["tap_target"]["criteria"] == {"1": "[1] micheleragaglia (tapped 1x earlier)"}
+    # Tapped twice on this identical screen: no longer offered, so scrolling is what remains.
+    assert "tap_target" not in third and "SCROLL_DOWN" in third["operation"]["criteria"]
+    assert driver.actions[-1][0] == "swipe"
+
+
+COMMENTS = raw_state(
+    node((0, 100, 1080, 300), text="micheleragaglia", isClickable=True),
+    node((0, 300, 1080, 2000), text="comments", isScrollable=True),
+    package="com.example.social",
+)
+
+
+async def test_session_lets_the_advisor_override_an_unsure_jev():
+    prompts: list[dict[str, Any]] = []
+
+    async def complete(system: str, user: str) -> str:
+        prompts.append(json.loads(user))
+        scroll = next(iter(prompts[-1]["targets"]["scroll_target"]))
+        if len(prompts) == 1:
+            return json.dumps(
+                {"operation": "SCROLL_DOWN", "target": scroll, "notes": "michele already followed", "reason": "all handled"}
+            )
+        return '{"operation": "DONE", "target": null}'
+
+    driver = FakeDriver(COMMENTS)
+    jev = ScriptedJev([("TAP", "micheleragaglia"), ("TAP", "micheleragaglia")], confidence=0.3)
+    events = await run_session(driver, jev, advisor=Advisor(complete, "executor:big"), max_steps=5)
+
+    assert driver.actions[0][0] == "swipe"  # the advisor's scroll, not Jev's tap
+    assert prompts[0]["smallModelProposal"] == {"operation": "TAP", "target": "1"}
+    assert prompts[1]["notes"] == "michele already followed"
+    assert jev.bodies[1]["state"]["progressNotes"] == "michele already followed"
+    thought = next(e for e in events if e.type == "thought")
+    assert "advised by executor:big: all handled" in thought.payload["description"]
+    assert events[-1].payload["success"] is True
+
+
+async def test_session_keeps_jevs_answer_when_the_advisor_fails():
+    async def complete(system: str, user: str) -> str:
+        return '{"operation": "SCROLL_SIDEWAYS"}'
+
+    jev = ScriptedJev([("DONE", None)], confidence=0.3)
+    events = await run_session(FakeDriver(COMMENTS), jev, advisor=Advisor(complete, "executor:big"))
+    assert any(e.type == "log" and "Jev advisor failed" in e.payload["message"] for e in events)
+    assert events[-1].payload["success"] is True
+
+
+async def test_session_does_not_ask_the_advisor_when_jev_is_sure():
+    async def complete(system: str, user: str) -> str:
+        raise AssertionError("not consulted")
+
+    driver = FakeDriver(LAUNCHER, _open_settings)
+    jev = ScriptedJev([("TAP", "Settings"), ("BACK", None), ("HOME", None)])
+    events = await run_session(driver, jev, advisor=Advisor(complete, "executor:big"), max_steps=2)
+    assert driver.actions == [("tap", 270, 200), ("button", "back")]
+    assert not any(e.type == "log" and "advisor failed" in e.payload["message"] for e in events)
+
+
+async def test_session_logs_scrollable_regions_in_ui_state():
+    listing = raw_state(node((0, 0, 1080, 2000), text="feed", isScrollable=True))
+    events = await run_session(FakeDriver(listing), ScriptedJev([("DONE", None)]))
+    ui = next(e for e in events if e.type == "ui_state").payload["elements"]
+    assert ui[0]["scrollable"] is True
 
 
 async def test_session_narrows_apps_by_the_spec_focus():

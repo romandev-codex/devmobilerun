@@ -12,11 +12,13 @@ import base64
 import logging
 import os
 import time
+from collections import Counter, defaultdict
 from dataclasses import dataclass
 from typing import Any, AsyncIterator, Callable
 
 from ..events import RunEvent
 from .actions import describe_action
+from .advisor import Advisor, load_advisor
 from .device import JevDevice, android_driver
 from .policy import (
     DEFAULT_BASE_URL,
@@ -35,6 +37,9 @@ WAIT_TIMEOUT_S = 15.0
 INPUT_TIMEOUT_S = 2.5
 POLL_S = 0.06
 REQUEST_TIMEOUT_S = 30.0
+#: Taps of one element on an identical screen before it is no longer offered there. Returning
+#: to a screen and tapping the same control once more is normal; a third time is a cycle.
+MAX_TAPS_PER_SCREEN = 2
 
 #: Why a session ended, as the run's result reason. ``done`` is the only success.
 OUTCOMES = {
@@ -120,6 +125,8 @@ def _ui_elements(observation: dict[str, Any]) -> list[dict[str, Any]]:
             "resourceId": e["resourceId"],
             "bounds": f"{b['left']},{b['top']},{b['right']},{b['bottom']}",
         }
+        if e["scrollable"]:
+            item["scrollable"] = True
         if e["checkable"]:
             item["checkedState"] = "checked" if e["checked"] else "unchecked"
         out.append(item)
@@ -136,6 +143,9 @@ def _decision_text(decision: dict[str, Any]) -> tuple[str, str]:
         parts.append(f"target {decision['targetConfidence']:.2f}")
     parts.append(f"{decision['latencyMs']:.0f} ms")
     parts.append(decision.get("responseModel") or decision["requestedModel"])
+    if decision.get("advisor"):
+        advisor = decision["advisor"]
+        parts.append(f"advised by {advisor['model']}{': ' + advisor['reason'] if advisor['reason'] else ''}")
     return text, " · ".join(parts)
 
 
@@ -158,12 +168,14 @@ class JevAgentRun:
         config: JevConfig | None = None,
         device: JevDevice | None = None,
         transport: Transport | None = None,
+        advisor: Advisor | None = None,
         sleep: Callable[[float], Any] = asyncio.sleep,
     ) -> None:
         self.spec = spec
         self.config = config or jev_config()
         self._device = device
         self._transport = transport
+        self._advisor = advisor
         self._sleep = sleep
 
     async def events(self) -> AsyncIterator[RunEvent]:
@@ -178,6 +190,13 @@ class JevAgentRun:
             )
         import httpx
 
+        if self._advisor is None:
+            try:
+                # Client setup reads config files; keep it off the event loop.
+                self._advisor = await asyncio.to_thread(load_advisor)
+            except Exception as exc:  # noqa: BLE001 - Jev still runs alone
+                logger.warning("jev advisor unavailable: %s", exc)
+                yield RunEvent("log", {"message": f"Jev advisor unavailable, running alone: {exc}"})
         async with httpx.AsyncClient() as client:
             async for event in self._session(httpx_transport(client, self.config)):
                 yield event
@@ -190,7 +209,8 @@ class JevAgentRun:
     async def _session(self, transport: Transport) -> AsyncIterator[RunEvent]:
         spec = self.spec
         device = self._device or JevDevice(android_driver(spec.device_serial), spec.device_serial)
-        policy = TypeSafePolicy(transport, model=self.config.model)
+        advisor = self._advisor
+        policy = TypeSafePolicy(transport, model=self.config.model, advisor=advisor)
         max_steps = spec.max_steps
         goal = spec.instruction
         texts = [v for v in [*spec.variables.values(), *spec.memory.values()] if isinstance(v, str) and v.strip()]
@@ -204,6 +224,9 @@ class JevAgentRun:
         history: list[dict[str, Any]] = []
         # Actions already tried on the current screen; cleared whenever the screen changes.
         repeated: set[str] = set()
+        # Taps over the whole run: by screen fingerprint (cycle guard) and by package and label (hint).
+        screen_taps: defaultdict[str, Counter[str]] = defaultdict(Counter)
+        label_taps: defaultdict[str, Counter[str]] = defaultdict(Counter)
         consecutive_waits = consecutive_stale = 0
         waiting_since: float | None = None
 
@@ -223,6 +246,8 @@ class JevAgentRun:
         await device.connect()
         observation, installed_apps = await asyncio.gather(device.observe(), device.list_apps())
         yield RunEvent("log", {"message": f"Jev ({self.config.model} via {self.config.provider}) on {len(installed_apps)} installed apps"})
+        if advisor is not None:
+            yield RunEvent("log", {"message": f"Jev advisor: {advisor.model} (asked when Jev is unsure)"})
 
         # Stale decisions never dispatch input, but still consume a separate model-call budget.
         for _attempt in range(max_steps * 2 + 4):
@@ -230,6 +255,8 @@ class JevAgentRun:
             guidance = _app_guidance(spec.app_cards, observation["phone"]["packageName"])
             if guidance:
                 context["appGuidance"] = guidance
+            if advisor is not None and advisor.notes:
+                context["progressNotes"] = advisor.notes
             decision, png = await asyncio.gather(
                 policy.decide(
                     goal=goal,
@@ -239,6 +266,12 @@ class JevAgentRun:
                     apps=installed_apps,
                     context=context,
                     app_goal=spec.focus,
+                    tapped=label_taps[observation["phone"]["packageName"]],
+                    exclude={
+                        element_id
+                        for element_id, count in screen_taps[observation["fingerprint"]].items()
+                        if count >= MAX_TAPS_PER_SCREEN
+                    },
                 ),
                 screenshot(),
             )
@@ -246,6 +279,8 @@ class JevAgentRun:
                 yield RunEvent("screenshot", {"step": step_index, "png": base64.b64encode(png).decode("ascii")})
             yield RunEvent("ui_state", {"step": step_index, "elements": _ui_elements(observation)})
             step_index += 1
+            if decision.get("advisorError"):
+                yield RunEvent("log", {"message": f"Jev advisor failed, using Jev's answer: {decision['advisorError']}"})
             text, description = _decision_text(decision)
             yield RunEvent("thought", {"text": text, "description": description, "source": "jev"})
 
@@ -310,6 +345,9 @@ class JevAgentRun:
             }
             if action["type"] == "type":
                 entry["text"] = action["text"]
+            if action["type"] == "tap-element":
+                screen_taps[observation["fingerprint"]][action["elementId"]] += 1
+                label_taps[observation["phone"]["packageName"]][label] += 1
             history.append(entry)
             # Report the mutation before observing: a failed read must not erase an executed action.
             yield RunEvent(

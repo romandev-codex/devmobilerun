@@ -50,9 +50,11 @@ async def test_end_step_runs_after_a_goal_that_succeeded_or_failed(client, frame
     await client.post("/runs", json=start_body(run_id="ends", endInstruction="Close the app"))
     events = await collect_events(client, "ends")
 
-    assert [e.event for e in events] == ["started", "action", "log", "action", "log", "result"]
-    assert events[2].data["message"] == "Running the task's end step"
-    assert events[4].data["message"] == "End step: Reached maximum steps (7)"
+    assert [e.event for e in events] == ["started", "action", "log", "log", "action", "log", "result"]
+    # Why the goal stopped is logged before the end step, which may itself be stopped.
+    assert events[2].data["message"] == "Goal ended: Reached maximum steps (7)"
+    assert events[3].data["message"] == "Running the task's end step"
+    assert events[5].data["message"] == "End step: Reached maximum steps (7)"
     # The run's own outcome stays the goal's, not the end step's.
     assert events[-1].data == {"success": success, "reason": "Reached maximum steps (7)", "steps": 7}
 
@@ -107,6 +109,7 @@ async def test_the_end_step_runs_even_when_the_agent_crashes(client, framework):
     await client.post("/runs", json=start_body(run_id="boom", endInstruction="Close the app"))
     events = await collect_events(client, "boom")
 
-    assert [e.event for e in events] == ["started", "log", "thought", "action", "log", "error"]
-    assert events[1].data["message"] == "Running the task's end step"
+    assert [e.event for e in events] == ["started", "log", "log", "thought", "action", "log", "error"]
+    assert events[1].data["message"] == "Goal ended: Boom: device fell over"
+    assert events[2].data["message"] == "Running the task's end step"
     assert events[-1].data["message"] == "Boom: device fell over"

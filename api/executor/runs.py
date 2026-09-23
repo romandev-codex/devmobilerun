@@ -180,6 +180,10 @@ class RunManager:
             # A stop request is the one outcome the end step does not follow:
             # whoever pressed it wants the device back now.
             if spec.end_instruction and not run.cancel_requested:
+                # The goal's ending is published last; say now why the goal stopped, in
+                # case the end step is itself stopped before that.
+                reason = terminal.payload.get("reason") or terminal.payload.get("message") or terminal.type
+                run.publish(RunEvent("log", {"message": f"Goal ended: {reason}"}))
                 await self._run_end_phase(run, progress)
             run.publish(terminal)
         except asyncio.CancelledError:
