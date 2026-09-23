@@ -15,7 +15,10 @@ from typing import Any, Awaitable, Callable
 
 from .actions import candidates_for, describe_action
 
-TYPESAFE_URL = "https://api.typesafe.ai/v1/systemone"
+#: TypeSafe's own API. OpenRouter serves the same System One API at
+#: ``https://openrouter.ai/api``; both take ``/v1/systemone`` appended.
+DEFAULT_BASE_URL = "https://api.typesafe.ai"
+OPENROUTER_BASE_URL = "https://openrouter.ai/api"
 DEFAULT_MODEL = "jev-latest"
 MAX_BODY_BYTES = 150_000
 MAX_APPS = 200

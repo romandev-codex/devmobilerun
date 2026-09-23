@@ -16,7 +16,7 @@ from executor.jev.policy import (
     text_candidates,
     validate_choice,
 )
-from executor.jev.run import JevAgentRun, JevConfig
+from executor.jev.run import JevAgentRun, JevConfig, httpx_transport, jev_config
 from executor.jev.state import StaleObservationError, assert_fresh, summarize_state
 
 pytestmark = pytest.mark.anyio
@@ -393,6 +393,38 @@ async def test_missing_api_key_fails_the_run():
     agent = JevAgentRun(spec(), config=JevConfig(api_key="", model="jev-latest"))
     with pytest.raises(RuntimeError, match="TYPESAFE_API_KEY"):
         [e async for e in agent.events()]
+
+
+def test_jev_config_defaults_to_typesafe(monkeypatch):
+    for name in ("TYPESAFE_API_KEY", "TYPESAFE_BASE_URL", "TYPESAFE_MODEL"):
+        monkeypatch.delenv(name, raising=False)
+    monkeypatch.setenv("OPENROUTER_API_KEY", "or-key")
+    config = jev_config()
+    assert (config.base_url, config.provider, config.model) == ("https://api.typesafe.ai", "TypeSafe", "jev-latest")
+    assert config.configured is False  # an OpenRouter key alone does not reach TypeSafe
+
+
+def test_jev_config_routes_through_openrouter_with_its_key(monkeypatch):
+    monkeypatch.delenv("TYPESAFE_API_KEY", raising=False)
+    monkeypatch.setenv("TYPESAFE_BASE_URL", "https://openrouter.ai/api/")
+    monkeypatch.setenv("OPENROUTER_API_KEY", "or-key")
+    config = jev_config()
+    assert (config.base_url, config.provider, config.api_key) == ("https://openrouter.ai/api", "OpenRouter", "or-key")
+
+
+async def test_transport_posts_to_the_configured_system_one_endpoint():
+    import httpx
+
+    seen = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen["url"], seen["auth"] = str(request.url), request.headers["authorization"]
+        return httpx.Response(200, json={"answers": {}})
+
+    config = JevConfig(api_key="or-key", model="jev-1.13", base_url="https://openrouter.ai/api")
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        await httpx_transport(client, config)({"model": "jev-1.13"})
+    assert seen == {"url": "https://openrouter.ai/api/v1/systemone", "auth": "Bearer or-key"}
 
 
 # ── HTTP seam ────────────────────────────────────────────────────────────

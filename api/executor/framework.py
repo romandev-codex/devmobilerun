@@ -27,6 +27,7 @@ class JevSummary:
 
     configured: bool
     model: str
+    provider: str = "TypeSafe"
 
 
 @dataclass(frozen=True)
@@ -147,7 +148,7 @@ class MobilerunFramework:
         return ConfigSummary(
             profiles=profiles,
             config_path=config_path,
-            jev=JevSummary(configured=jev.configured, model=jev.model),
+            jev=JevSummary(configured=jev.configured, model=jev.model, provider=jev.provider),
         )
 
     async def list_devices(self) -> list[DeviceInfo]:

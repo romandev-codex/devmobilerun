@@ -96,6 +96,7 @@ npm run check                   # typecheck + lint + both test suites
 | `MOBILERUN_CONFIG` | executor | Optional path to a framework config file                                           |
 | `TYPESAFE_API_KEY` | executor | Enables the TypeSafe Jev agent; get a key from the [TypeSafe console](https://console.typesafe.ai) |
 | `TYPESAFE_MODEL`   | executor | Jev model, default `jev-latest`; pin a fixed version when comparing runs           |
+| `TYPESAFE_BASE_URL` | executor | System One API base, default `https://api.typesafe.ai`; `https://openrouter.ai/api` for OpenRouter |
 
 ## How runs work
 
@@ -130,6 +131,10 @@ Each task picks the engine that drives the phone under Agent options:
   done, blocked) and its target in a single request. Code checks that the target is unchanged before acting and
   never retries an action whose outcome is uncertain. Set `TYPESAFE_API_KEY` on the executor; Settings shows
   whether it is configured.
+
+To use Jev through [OpenRouter](https://openrouter.ai/typesafe/jev-1.13) instead, billed to your OpenRouter
+account, set `TYPESAFE_BASE_URL=https://openrouter.ai/api`. The executor then uses `OPENROUTER_API_KEY` unless
+`TYPESAFE_API_KEY` is set. OpenRouter serves the same System One API, so nothing else changes.
 
 Jev types only exact text: spans of up to eight words from the goal, plus the values of the task's variables
 and memory. Put field values that are not in the goal in a variable. It sees task variables, memory and the app

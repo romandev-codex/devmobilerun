@@ -82,6 +82,7 @@ with a token that has `read:packages`.
 | `OPENROUTER_API_KEY`       | unset                                  | Provider key for the models in the framework config                  |
 | `TYPESAFE_API_KEY`         | unset                                  | Enables the TypeSafe Jev agent                                       |
 | `TYPESAFE_MODEL`           | `jev-latest`                           | Jev model used by tasks set to the Jev agent                         |
+| `TYPESAFE_BASE_URL`        | `https://api.typesafe.ai`              | `https://openrouter.ai/api` to call Jev through OpenRouter           |
 
 The framework config lands in the `/config` volume on first start. Edit it there
 (`docker exec -it mobilerun vi /config/config.yaml`) and restart the container —

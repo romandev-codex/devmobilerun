@@ -16,7 +16,7 @@ export type ExecutorConfig = {
   profiles: LlmProfileInfo[]
   configPath: string | null
   /** Whether the executor has a TypeSafe key for Jev; absent on older executors. */
-  jev?: { configured: boolean; model: string } | null
+  jev?: { configured: boolean; model: string; provider?: string } | null
 }
 
 export type ExecutorDevice = {

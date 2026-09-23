@@ -18,6 +18,7 @@ class LlmProfileInfo(BaseModel):
 class JevInfo(BaseModel):
     configured: bool
     model: str
+    provider: str = "TypeSafe"
 
 
 class ConfigResponse(BaseModel):

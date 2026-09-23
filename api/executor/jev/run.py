@@ -18,7 +18,14 @@ from typing import Any, AsyncIterator, Callable
 from ..events import RunEvent
 from .actions import describe_action
 from .device import JevDevice, android_driver
-from .policy import DEFAULT_MODEL, TYPESAFE_URL, PolicyError, Transport, TypeSafePolicy
+from .policy import (
+    DEFAULT_BASE_URL,
+    DEFAULT_MODEL,
+    OPENROUTER_BASE_URL,
+    PolicyError,
+    Transport,
+    TypeSafePolicy,
+)
 from .state import StaleObservationError, input_matches
 
 logger = logging.getLogger(__name__)
@@ -48,6 +55,11 @@ OUTCOMES = {
 class JevConfig:
     api_key: str
     model: str
+    base_url: str = DEFAULT_BASE_URL
+
+    @property
+    def provider(self) -> str:
+        return "OpenRouter" if self.base_url.startswith("https://openrouter.ai/") else "TypeSafe"
 
     @property
     def configured(self) -> bool:
@@ -55,18 +67,31 @@ class JevConfig:
 
 
 def jev_config() -> JevConfig:
+    """Jev settings from the environment, named as the TypeSafe SDKs name them.
+
+    ``TYPESAFE_BASE_URL=https://openrouter.ai/api`` sends requests through
+    OpenRouter, billed to the OpenRouter key; ``OPENROUTER_API_KEY`` then
+    stands in when ``TYPESAFE_API_KEY`` is not set.
+    """
+    base_url = (os.environ.get("TYPESAFE_BASE_URL", "").strip() or OPENROUTER_BASE_URL).rstrip("/")
+    api_key = os.environ.get("TYPESAFE_API_KEY", "").strip()
+    if not api_key and base_url == OPENROUTER_BASE_URL:
+        api_key = os.environ.get("OPENROUTER_API_KEY", "").strip()
     return JevConfig(
-        api_key=os.environ.get("TYPESAFE_API_KEY", "").strip(),
+        api_key=api_key,
         model=os.environ.get("TYPESAFE_MODEL", "").strip() or DEFAULT_MODEL,
+        base_url=base_url,
     )
 
 
-def httpx_transport(client: Any, api_key: str) -> Transport:
-    """Posts to TypeSafe on one pooled connection, kept warm across decisions."""
+def httpx_transport(client: Any, config: JevConfig) -> Transport:
+    """Posts to System One on one pooled connection, kept warm across decisions."""
+    url = f"{config.base_url}/v1/systemone"
+    api_key = config.api_key
 
     async def send(body: dict[str, Any]) -> Any:
         response = await client.post(
-            TYPESAFE_URL,
+            url,
             json=body,
             headers={"Authorization": f"Bearer {api_key}"},
             timeout=REQUEST_TIMEOUT_S,
@@ -78,7 +103,7 @@ def httpx_transport(client: Any, api_key: str) -> Transport:
                 detail = error.get("message", "") if isinstance(error, dict) else str(error or "")
             except Exception:  # noqa: BLE001 - the status alone is still worth reporting
                 pass
-            raise PolicyError(f"TypeSafe returned HTTP {response.status_code}{': ' + detail if detail else ''}")
+            raise PolicyError(f"{config.provider} returned HTTP {response.status_code}{': ' + detail if detail else ''}")
         return response.json()
 
     return send
@@ -147,11 +172,14 @@ class JevAgentRun:
                 yield event
             return
         if not self.config.configured:
-            raise RuntimeError("TYPESAFE_API_KEY is not set on the executor; Jev cannot run.")
+            raise RuntimeError(
+                "No Jev API key on the executor: set TYPESAFE_API_KEY, or TYPESAFE_BASE_URL="
+                f"{OPENROUTER_BASE_URL} with OPENROUTER_API_KEY."
+            )
         import httpx
 
         async with httpx.AsyncClient() as client:
-            async for event in self._session(httpx_transport(client, self.config.api_key)):
+            async for event in self._session(httpx_transport(client, self.config)):
                 yield event
 
     async def cancel(self) -> None:
@@ -193,7 +221,7 @@ class JevAgentRun:
 
         await device.connect()
         observation, installed_apps = await asyncio.gather(device.observe(), device.list_apps())
-        yield RunEvent("log", {"message": f"Jev ({self.config.model}) on {len(installed_apps)} installed apps"})
+        yield RunEvent("log", {"message": f"Jev ({self.config.model} via {self.config.provider}) on {len(installed_apps)} installed apps"})
 
         # Stale decisions never dispatch input, but still consume a separate model-call budget.
         for _attempt in range(max_steps * 2 + 4):

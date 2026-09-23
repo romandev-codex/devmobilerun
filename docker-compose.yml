@@ -22,6 +22,9 @@ services:
       # Optional: enables the TypeSafe Jev agent.
       TYPESAFE_API_KEY: ${TYPESAFE_API_KEY:-}
       TYPESAFE_MODEL: ${TYPESAFE_MODEL:-jev-latest}
+      # https://openrouter.ai/api to call Jev through OpenRouter with OPENROUTER_API_KEY.
+      TYPESAFE_BASE_URL: ${TYPESAFE_BASE_URL:-}
+      OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:-}
     volumes:
       - ${MOBILERUN_CONFIG_DIR:-~/Library/Application Support/droidrun}:/config:ro
     ports:

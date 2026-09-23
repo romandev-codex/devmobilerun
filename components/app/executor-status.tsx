@@ -58,10 +58,14 @@ export function ExecutorStatus({ snapshot }: { snapshot: ExecutorSnapshot }) {
           <span className="text-muted-foreground">TypeSafe Jev</span>
           <span>
             {config.jev?.configured ? (
-              <span className="font-mono">{config.jev.model}</span>
+              <span>
+                <span className="font-mono">{config.jev.model}</span>
+                {config.jev.provider ? ` via ${config.jev.provider}` : null}
+              </span>
             ) : (
               <span className="text-muted-foreground">
-                not configured (set TYPESAFE_API_KEY on the executor)
+                not configured (set TYPESAFE_API_KEY, or use OpenRouter; see
+                README)
               </span>
             )}
           </span>

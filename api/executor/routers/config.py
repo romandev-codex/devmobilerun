@@ -18,5 +18,9 @@ def config(framework: Framework = Depends(get_framework)) -> ConfigResponse:
             for p in summary.profiles
         ],
         configPath=summary.config_path,
-        jev=JevInfo(configured=summary.jev.configured, model=summary.jev.model) if summary.jev else None,
+        jev=JevInfo(
+            configured=summary.jev.configured,
+            model=summary.jev.model,
+            provider=summary.jev.provider,
+        ) if summary.jev else None,
     )
