@@ -607,17 +607,40 @@ async function blockedByQueueRun(serial: string): Promise<boolean> {
 }
 
 /**
+ * A run that merely ran out of steps did not fail the way `maxFails` is meant
+ * to catch: the agent was still working when its step budget ended. The agent
+ * stops as soon as `step_number >= max_steps`, so the final step count reaching
+ * the run's own budget is what identifies that stop.
+ */
+function ranOutOfSteps(run: {
+  result?: { success?: boolean; steps?: number } | null
+  options?: { maxSteps?: number } | null
+}): boolean {
+  const steps = run.result?.steps
+  const maxSteps = run.options?.maxSteps
+  if (run.result?.success !== false || steps == null || maxSteps == null)
+    return false
+  return maxSteps > 0 && steps >= maxSteps
+}
+
+/**
  * What a finished run does to the fail streak: a failed or lost run extends it,
- * a success clears it, and a deliberate cancellation leaves it as it was.
+ * a success clears it, and a deliberate cancellation — or a run that only ran
+ * out of steps — leaves it as it was.
  */
 async function failStreakEffect(
   runId: mongoose.Types.ObjectId
 ): Promise<"extend" | "clear" | "keep"> {
   const run = await Run.findById(runId)
-    .select("status")
-    .lean<{ status: string }>()
+    .select("status result options")
+    .lean<{
+      status: string
+      result?: { success?: boolean; steps?: number } | null
+      options?: { maxSteps?: number } | null
+    }>()
   if (!run) return "keep"
   if (run.status === "succeeded") return "clear"
+  if (run.status === "failed" && ranOutOfSteps(run)) return "keep"
   if (run.status === "failed" || run.status === "lost") return "extend"
   return "keep"
 }

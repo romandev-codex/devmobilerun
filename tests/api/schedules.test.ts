@@ -27,16 +27,19 @@ beforeAll(async () => {
 })
 
 /** Scripts what the executor reports for the runs that follow. */
-function outcome(success: boolean) {
+function outcome(success: boolean, steps = 1) {
   fake.on("GET", "/runs/:id/events", (_req, res) =>
     writeSse(res, [
       {
         event: "result",
-        data: { success, reason: success ? "ok" : "nope", steps: 1 },
+        data: { success, reason: success ? "ok" : "nope", steps },
       },
     ])
   )
 }
+
+/** The default step budget a task is created with. */
+const TASK_MAX_STEPS = 15
 
 afterEach(() => outcome(true))
 
@@ -269,6 +272,27 @@ describe("schedules", () => {
     expect(await pendingTicks(id)).toBe(0)
     await tick(id)
     expect(await runsFor(id)).toHaveLength(2)
+  })
+
+  it("a run that only ran out of steps does not extend the fail streak", async () => {
+    const t = await task("outofsteps")
+    const { body } = await create({
+      taskId: t,
+      deviceSerial: "A",
+      intervalSeconds: 10,
+      maxFails: 2,
+    })
+    const id = body.schedule.id as string
+    outcome(false, TASK_MAX_STEPS)
+    await tick(id)
+    await tick(id)
+    // Two step-exhausted runs would have tripped maxFails had they counted.
+    expect(await get(id)).toMatchObject({
+      failStreak: 0,
+      runCount: 2,
+      enabled: true,
+    })
+    expect(await pendingTicks(id)).toBe(1)
   })
 
   it("a success clears the fail streak and a skipped tick leaves it alone", async () => {
