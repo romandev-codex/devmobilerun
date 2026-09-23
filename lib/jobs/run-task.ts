@@ -1,6 +1,7 @@
 import type mongoose from "mongoose"
 import { setTimeout as sleep } from "node:timers/promises"
 
+import { toTaskOptions } from "@/lib/agents"
 import { appCardsForRun } from "@/lib/app-cards"
 import { connectDb } from "@/lib/db"
 import { checkDeviceThermal } from "@/lib/device-thermal"
@@ -91,7 +92,7 @@ export async function executeRun(runId: string): Promise<void> {
       instruction: run.instruction,
       startUrl: run.startUrl,
       endInstruction: run.endInstruction,
-      options: run.options,
+      options: toTaskOptions(run.options),
       variables: (run.variables as Record<string, string>) ?? {},
       prompts: settings.prompts,
       appCards,

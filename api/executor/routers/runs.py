@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import json
-from typing import Any
+from typing import Any, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import StreamingResponse
@@ -21,6 +21,7 @@ def get_run_manager(request: Request) -> RunManager:
 
 
 class RunOptions(BaseModel):
+    agent: Literal["mobilerun", "jev"] = "mobilerun"
     vision: bool = False
     reasoning: bool = False
     maxSteps: int = Field(default=15, ge=1, le=500)
@@ -51,6 +52,7 @@ async def start_run(body: StartRunRequest, runs: RunManager = Depends(get_run_ma
         run_id=body.runId,
         device_serial=body.deviceSerial,
         instruction=body.instruction,
+        agent=body.options.agent,
         start_url=body.startUrl,
         end_instruction=body.endInstruction,
         vision=body.options.vision,

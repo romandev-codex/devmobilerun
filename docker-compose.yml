@@ -19,6 +19,9 @@ services:
       EXECUTOR_PORT: "8765"
       # Mount your framework config and API keys; see README.
       MOBILERUN_CONFIG: /config/config.yaml
+      # Optional: enables the TypeSafe Jev agent.
+      TYPESAFE_API_KEY: ${TYPESAFE_API_KEY:-}
+      TYPESAFE_MODEL: ${TYPESAFE_MODEL:-jev-latest}
     volumes:
       - ${MOBILERUN_CONFIG_DIR:-~/Library/Application Support/droidrun}:/config:ro
     ports:

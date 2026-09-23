@@ -55,6 +55,16 @@ export function ExecutorStatus({ snapshot }: { snapshot: ExecutorSnapshot }) {
           <span className="truncate font-mono" title={config.configPath ?? ""}>
             {config.configPath ?? "default"}
           </span>
+          <span className="text-muted-foreground">TypeSafe Jev</span>
+          <span>
+            {config.jev?.configured ? (
+              <span className="font-mono">{config.jev.model}</span>
+            ) : (
+              <span className="text-muted-foreground">
+                not configured (set TYPESAFE_API_KEY on the executor)
+              </span>
+            )}
+          </span>
         </CardContent>
       </Card>
       <Card>

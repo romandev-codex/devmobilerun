@@ -1,3 +1,5 @@
+import type { TaskOptions } from "@/lib/agents"
+
 export type ExecutorHealth = {
   status: string
   version: string
@@ -13,6 +15,8 @@ export type LlmProfileInfo = {
 export type ExecutorConfig = {
   profiles: LlmProfileInfo[]
   configPath: string | null
+  /** Whether the executor has a TypeSafe key for Jev; absent on older executors. */
+  jev?: { configured: boolean; model: string } | null
 }
 
 export type ExecutorDevice = {
@@ -33,7 +37,7 @@ export type StartRunRequest = {
   startUrl?: string | null
   /** The task's closing step; the executor runs it after the goal, whatever the goal did. */
   endInstruction?: string | null
-  options: { vision: boolean; reasoning: boolean; maxSteps: number }
+  options: TaskOptions
   variables: Record<string, string>
   prompts?: Record<string, string>
   appCards?: unknown[]

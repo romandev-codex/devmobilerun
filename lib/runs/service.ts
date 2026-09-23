@@ -1,6 +1,7 @@
 import mongoose from "mongoose"
 import { z } from "zod"
 
+import { type TaskOptions, toTaskOptions } from "@/lib/agents"
 import { conflict, notFound } from "@/lib/api/errors"
 import { asObjectId as toObjectId, connectDb } from "@/lib/db"
 import { Device } from "@/lib/models/device"
@@ -26,7 +27,7 @@ export type RunView = {
   instruction: string
   startUrl: string | null
   endInstruction: string | null
-  options: { vision: boolean; reasoning: boolean; maxSteps: number }
+  options: TaskOptions
   variables: Record<string, string>
   prompts: Record<string, string>
   appCards: { packageName: string; name: string; content: string }[]
@@ -57,7 +58,7 @@ export function toRunView(doc: RunDoc): RunView {
     instruction: doc.instruction ?? "",
     startUrl: doc.startUrl ?? null,
     endInstruction: doc.endInstruction ?? null,
-    options: doc.options,
+    options: toTaskOptions(doc.options),
     variables: (doc.variables as Record<string, string>) ?? {},
     prompts: (doc.prompts as Record<string, string>) ?? {},
     appCards: (doc.appCards as RunView["appCards"]) ?? [],

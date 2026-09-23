@@ -1,5 +1,6 @@
 import mongoose, { Schema, type InferSchemaType, type Model } from "mongoose"
 
+import { AGENTS } from "@/lib/agents"
 import { RUN_STATUSES } from "@/lib/run-status"
 
 export {
@@ -10,6 +11,8 @@ export {
 
 const runOptionsSchema = new Schema(
   {
+    /** Absent on runs stored before the agent choice existed: those ran mobilerun. */
+    agent: { type: String, enum: AGENTS, default: "mobilerun" },
     vision: { type: Boolean, required: true },
     reasoning: { type: Boolean, required: true },
     maxSteps: { type: Number, required: true },

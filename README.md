@@ -94,6 +94,8 @@ npm run check                   # typecheck + lint + both test suites
 | `EXECUTOR_HOST`    | executor | Bind address, default `127.0.0.1`                                                  |
 | `EXECUTOR_PORT`    | executor | Port, default `8765`                                                               |
 | `MOBILERUN_CONFIG` | executor | Optional path to a framework config file                                           |
+| `TYPESAFE_API_KEY` | executor | Enables the TypeSafe Jev agent; get a key from the [TypeSafe console](https://console.typesafe.ai) |
+| `TYPESAFE_MODEL`   | executor | Jev model, default `jev-latest`; pin a fixed version when comparing runs           |
 
 ## How runs work
 
@@ -115,6 +117,25 @@ npm run check                   # typecheck + lint + both test suites
    their schedule.
 7. App cards are read by the framework's planner (reasoning on). With reasoning off they are appended to the
    instruction as app guidance so they still reach the model.
+
+## Agents: mobilerun or TypeSafe Jev
+
+Each task picks the engine that drives the phone under Agent options:
+
+- **mobilerun** (default): the framework's agent with the LLM from the framework config. Vision, reasoning,
+  prompt overrides, app cards and the memory tools apply.
+- **TypeSafe Jev**: a port of [droidrun/mobile-jev](https://github.com/droidrun/mobile-jev) running in the
+  executor over adb and Portal (no Mobilerun cloud device needed). Each step, code lists the controls on screen
+  and [Jev](https://docs.typesafe.ai) picks one operation (open app, tap, type, scroll, back, home, enter, wait,
+  done, blocked) and its target in a single request. Code checks that the target is unchanged before acting and
+  never retries an action whose outcome is uncertain. Set `TYPESAFE_API_KEY` on the executor; Settings shows
+  whether it is configured.
+
+Jev types only exact text: spans of up to eight words from the goal, plus the values of the task's variables
+and memory. Put field values that are not in the goal in a variable. It sees task variables, memory and the app
+card of the foreground app as context, but cannot change memory, and vision, reasoning and prompt overrides do
+not apply. Jev's "done" is the model's claim, reported as such in the result; it is not independent
+verification. Start URLs, end steps, stop, step screenshots and schedules work as for mobilerun.
 
 ## Troubleshooting
 

@@ -15,9 +15,15 @@ class LlmProfileInfo(BaseModel):
     model: str
 
 
+class JevInfo(BaseModel):
+    configured: bool
+    model: str
+
+
 class ConfigResponse(BaseModel):
     profiles: list[LlmProfileInfo]
     configPath: str | None = None
+    jev: JevInfo | None = None
 
 
 class ErrorBody(BaseModel):

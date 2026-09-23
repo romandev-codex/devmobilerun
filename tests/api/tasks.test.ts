@@ -76,9 +76,38 @@ describe("tasks", () => {
     expect(body.task).toMatchObject({
       start: null,
       end: null,
-      options: { vision: false, reasoning: false, maxSteps: 15 },
+      options: {
+        agent: "mobilerun",
+        vision: false,
+        reasoning: false,
+        maxSteps: 15,
+      },
       variables: [],
     })
+  })
+
+  it("stores the Jev agent choice and switches it with a patch", async () => {
+    const { status, body } = await create({
+      ...valid,
+      options: { agent: "jev", maxSteps: 30 },
+    })
+    expect(status).toBe(201)
+    expect(body.task.options).toEqual({
+      agent: "jev",
+      vision: false,
+      reasoning: false,
+      maxSteps: 30,
+    })
+    const updated = await one("PATCH", body.task.id, {
+      options: { agent: "mobilerun" },
+    })
+    expect(updated.body.task.options).toMatchObject({
+      agent: "mobilerun",
+      maxSteps: 30,
+    })
+    expect((await create({ ...valid, options: { agent: "gpt" } })).status).toBe(
+      400
+    )
   })
 
   it("rejects invalid input with a validation_error envelope", async () => {
@@ -154,6 +183,7 @@ describe("tasks", () => {
     })
     expect(updated.status).toBe(200)
     expect(updated.body.task.options).toEqual({
+      agent: "mobilerun",
       vision: true,
       reasoning: true,
       maxSteps: 200,

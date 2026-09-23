@@ -2083,6 +2083,7 @@ version = "0.1.0"
 source = { editable = "." }
 dependencies = [
     { name = "fastapi" },
+    { name = "httpx" },
     { name = "mobilerun" },
     { name = "pydantic" },
     { name = "uvicorn", extra = ["standard"] },
@@ -2100,6 +2101,7 @@ dev = [
 requires-dist = [
     { name = "anyio", marker = "extra == 'dev'", specifier = ">=4.0.0" },
     { name = "fastapi", specifier = ">=0.115.0" },
+    { name = "httpx", specifier = ">=0.27.0" },
     { name = "httpx", marker = "extra == 'dev'", specifier = ">=0.27.0" },
     { name = "mobilerun", directory = "mobilerun" },
     { name = "pydantic", specifier = ">=2.11.0" },

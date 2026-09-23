@@ -4,7 +4,7 @@ from fastapi import APIRouter, Depends
 
 from ..deps import get_framework, require_token
 from ..framework import Framework
-from ..models import ConfigResponse, LlmProfileInfo
+from ..models import ConfigResponse, JevInfo, LlmProfileInfo
 
 router = APIRouter(dependencies=[Depends(require_token)])
 
@@ -18,4 +18,5 @@ def config(framework: Framework = Depends(get_framework)) -> ConfigResponse:
             for p in summary.profiles
         ],
         configPath=summary.config_path,
+        jev=JevInfo(configured=summary.jev.configured, model=summary.jev.model) if summary.jev else None,
     )

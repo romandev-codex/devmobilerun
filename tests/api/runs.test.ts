@@ -253,6 +253,34 @@ describe("executeRun", () => {
     expect((await device())!.activeRunId).toBeNull()
   })
 
+  it("starts a Jev task with the Jev agent on the executor", async () => {
+    await syncDevices()
+    const task = await createTask({
+      options: { agent: "jev", maxSteps: 12 },
+    })
+    const { body } = await runNow(task.id)
+    expect(body.run.options).toEqual({
+      agent: "jev",
+      vision: false,
+      reasoning: false,
+      maxSteps: 12,
+    })
+    script = [
+      {
+        event: "result",
+        data: { success: true, reason: "Jev reported done", steps: 1 },
+      },
+    ]
+    const { executeRun } = await import("@/lib/jobs/run-task")
+    await executeRun(body.run.id)
+    expect(startBodies[0].options).toEqual({
+      agent: "jev",
+      vision: false,
+      reasoning: false,
+      maxSteps: 12,
+    })
+  })
+
   it("records a failed run when the agent reports failure or an error event", async () => {
     await syncDevices()
     const task = await createTask()
@@ -590,7 +618,10 @@ describe("device temperature check", () => {
 
   it("skips the run and puts the device on cooldown when it is too hot", async () => {
     await syncDevices()
-    await saveSettings({ maxDeviceTemperatureC: 42, deviceCooldownSeconds: 120 })
+    await saveSettings({
+      maxDeviceTemperatureC: 42,
+      deviceCooldownSeconds: 120,
+    })
     thermal = { status: 200, body: { temperatureC: 43.7 } }
     const task = await createTask()
     const { body } = await runNow(task.id)

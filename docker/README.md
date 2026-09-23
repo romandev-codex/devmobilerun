@@ -80,6 +80,8 @@ with a token that has `read:packages`.
 | `MONGODB_DB`               | `mobilerun`                            | Database name                                                        |
 | `MOBILERUN_CONFIG`         | `/config/config.yaml`                  | Framework config; seeded from the bundled default on first start     |
 | `OPENROUTER_API_KEY`       | unset                                  | Provider key for the models in the framework config                  |
+| `TYPESAFE_API_KEY`         | unset                                  | Enables the TypeSafe Jev agent                                       |
+| `TYPESAFE_MODEL`           | `jev-latest`                           | Jev model used by tasks set to the Jev agent                         |
 
 The framework config lands in the `/config` volume on first start. Edit it there
 (`docker exec -it mobilerun vi /config/config.yaml`) and restart the container —

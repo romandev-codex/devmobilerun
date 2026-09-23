@@ -91,7 +91,7 @@ export function renderRunLog(run: RunView, events: RunEventView[]): string {
     `Run ${run.id} — ${run.taskName}`,
     `Status: ${run.status} · Device: ${run.deviceSerial} · Trigger: ${run.trigger}`,
     `Created: ${run.createdAt} · Started: ${run.startedAt ?? "-"} · Finished: ${run.finishedAt ?? "-"}`,
-    `Options: vision=${o.vision} reasoning=${o.reasoning} maxSteps=${o.maxSteps}`,
+    `Options: agent=${o.agent} vision=${o.vision} reasoning=${o.reasoning} maxSteps=${o.maxSteps}`,
   ]
   if (run.startUrl) lines.push(`Start URL: ${run.startUrl}`)
   if (run.result)

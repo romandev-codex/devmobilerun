@@ -1,5 +1,7 @@
 import mongoose, { Schema, type InferSchemaType, type Model } from "mongoose"
 
+import { AGENTS } from "@/lib/agents"
+
 const startSchema = new Schema(
   {
     type: { type: String, enum: ["url", "instruction"], required: true },
@@ -10,6 +12,12 @@ const startSchema = new Schema(
 
 const optionsSchema = new Schema(
   {
+    agent: {
+      type: String,
+      enum: AGENTS,
+      required: true,
+      default: "mobilerun",
+    },
     vision: { type: Boolean, required: true, default: false },
     reasoning: { type: Boolean, required: true, default: false },
     maxSteps: { type: Number, required: true, default: 15 },

@@ -22,9 +22,18 @@ class LlmProfile:
 
 
 @dataclass(frozen=True)
+class JevSummary:
+    """Whether the executor can run TypeSafe's Jev, and with which model."""
+
+    configured: bool
+    model: str
+
+
+@dataclass(frozen=True)
 class ConfigSummary:
     profiles: list[LlmProfile]
     config_path: str | None
+    jev: JevSummary | None = None
 
 
 @dataclass(frozen=True)
@@ -39,6 +48,8 @@ class RunSpec:
     run_id: str
     device_serial: str
     instruction: str
+    """Which engine drives the phone: the mobilerun agent or TypeSafe's Jev."""
+    agent: str = "mobilerun"
     start_url: str | None = None
     """The task's closing step, run after the goal whatever the goal did."""
     end_instruction: str | None = None
@@ -130,7 +141,14 @@ class MobilerunFramework:
             config_path = env_path
         else:
             config_path = str(ConfigLoader.get_user_config_path())
-        return ConfigSummary(profiles=profiles, config_path=config_path)
+        from .jev import jev_config
+
+        jev = jev_config()
+        return ConfigSummary(
+            profiles=profiles,
+            config_path=config_path,
+            jev=JevSummary(configured=jev.configured, model=jev.model),
+        )
 
     async def list_devices(self) -> list[DeviceInfo]:
         from async_adbutils import adb
@@ -184,6 +202,10 @@ class MobilerunFramework:
         await device.shell(["am", "start", "-a", "android.intent.action.VIEW", "-d", url])
 
     def create_run(self, spec: RunSpec) -> AgentRun:
+        if spec.agent == "jev":
+            from .jev import JevAgentRun
+
+            return JevAgentRun(spec)
         return MobilerunAgentRun(spec)
 
 

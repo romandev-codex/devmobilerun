@@ -16,6 +16,7 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Switch } from "@/components/ui/switch"
 import { Textarea } from "@/components/ui/textarea"
+import { AGENT_LABELS, AGENTS, type AgentKind } from "@/lib/agents"
 import { apiJson } from "@/lib/client/api"
 import type { TaskView } from "@/lib/tasks"
 
@@ -27,6 +28,7 @@ type FormState = {
   startValue: string
   goal: string
   end: string
+  agent: AgentKind
   vision: boolean
   reasoning: boolean
   maxSteps: string
@@ -40,6 +42,7 @@ function fromTask(task?: TaskView): FormState {
     startValue: task?.start?.value ?? "",
     goal: task?.goal ?? "",
     end: task?.end ?? "",
+    agent: task?.options.agent ?? "mobilerun",
     vision: task?.options.vision ?? false,
     reasoning: task?.options.reasoning ?? false,
     maxSteps: String(task?.options.maxSteps ?? 15),
@@ -57,6 +60,7 @@ function toPayload(f: FormState) {
     goal: f.goal,
     end: f.end,
     options: {
+      agent: f.agent,
       vision: f.vision,
       reasoning: f.reasoning,
       maxSteps: Number(f.maxSteps),
@@ -185,30 +189,56 @@ export function TaskForm({ task }: { task?: TaskView }) {
           <CardTitle>Agent options</CardTitle>
         </CardHeader>
         <CardContent className="grid gap-4">
-          <label className="flex items-center justify-between gap-4 text-sm">
-            <span>
-              Vision
-              <span className="block text-xs text-muted-foreground">
-                Send screenshots to the model in addition to the UI tree.
-              </span>
-            </span>
-            <Switch
-              checked={form.vision}
-              onCheckedChange={(v) => set("vision", v)}
-            />
-          </label>
-          <label className="flex items-center justify-between gap-4 text-sm">
-            <span>
-              Reasoning
-              <span className="block text-xs text-muted-foreground">
-                Use the planner and executor agents instead of direct execution.
-              </span>
-            </span>
-            <Switch
-              checked={form.reasoning}
-              onCheckedChange={(v) => set("reasoning", v)}
-            />
-          </label>
+          <div className="grid gap-1.5">
+            <Label>Agent</Label>
+            <div className="flex flex-wrap gap-2">
+              {AGENTS.map((agent) => (
+                <Button
+                  key={agent}
+                  type="button"
+                  size="sm"
+                  variant={form.agent === agent ? "default" : "outline"}
+                  onClick={() => set("agent", agent)}
+                >
+                  {AGENT_LABELS[agent]}
+                </Button>
+              ))}
+            </div>
+            <p className="text-xs text-muted-foreground">
+              {form.agent === "jev"
+                ? "TypeSafe's Jev picks one operation per step from the controls on screen. It types only exact text from the goal or the task variables, and its \"done\" is the model's claim. Needs TYPESAFE_API_KEY on the executor."
+                : "The mobilerun agent, using the LLM from the framework config."}
+            </p>
+          </div>
+          {form.agent === "mobilerun" ? (
+            <>
+              <label className="flex items-center justify-between gap-4 text-sm">
+                <span>
+                  Vision
+                  <span className="block text-xs text-muted-foreground">
+                    Send screenshots to the model in addition to the UI tree.
+                  </span>
+                </span>
+                <Switch
+                  checked={form.vision}
+                  onCheckedChange={(v) => set("vision", v)}
+                />
+              </label>
+              <label className="flex items-center justify-between gap-4 text-sm">
+                <span>
+                  Reasoning
+                  <span className="block text-xs text-muted-foreground">
+                    Use the planner and executor agents instead of direct
+                    execution.
+                  </span>
+                </span>
+                <Switch
+                  checked={form.reasoning}
+                  onCheckedChange={(v) => set("reasoning", v)}
+                />
+              </label>
+            </>
+          ) : null}
           <div className="grid gap-1.5">
             <Label htmlFor="maxSteps">Max steps</Label>
             <Input

@@ -1,6 +1,7 @@
 import mongoose from "mongoose"
 import { z } from "zod"
 
+import { AGENTS, type TaskOptions, toTaskOptions } from "@/lib/agents"
 import { notFound } from "@/lib/api/errors"
 import { asObjectId as toObjectId, connectDb } from "@/lib/db"
 import { Run } from "@/lib/models/run"
@@ -22,6 +23,7 @@ export const taskStartSchema = z.discriminatedUnion("type", [
 ])
 
 export const taskOptionsSchema = z.object({
+  agent: z.enum(AGENTS).default("mobilerun"),
   vision: z.boolean().default(false),
   reasoning: z.boolean().default(false),
   maxSteps: z.number().int().min(1).max(500).default(15),
@@ -63,6 +65,7 @@ export const createTaskSchema = z.object({
     .nullable()
     .default(null),
   options: taskOptionsSchema.default({
+    agent: "mobilerun",
     vision: false,
     reasoning: false,
     maxSteps: 15,
@@ -73,6 +76,7 @@ export const createTaskSchema = z.object({
 /** Option fields without defaults, so a patch only touches what it names. */
 const taskOptionsPatchSchema = z
   .object({
+    agent: z.enum(AGENTS),
     vision: z.boolean(),
     reasoning: z.boolean(),
     maxSteps: z.number().int().min(1).max(500),
@@ -104,7 +108,7 @@ export type TaskView = {
   start: { type: "url" | "instruction"; value: string } | null
   goal: string
   end: string | null
-  options: { vision: boolean; reasoning: boolean; maxSteps: number }
+  options: TaskOptions
   variables: { key: string; value: string }[]
   createdAt: string
   updatedAt: string
@@ -122,11 +126,7 @@ export function toTaskView(doc: TaskDoc): TaskView {
     start: doc.start ? { type: doc.start.type, value: doc.start.value } : null,
     goal: doc.goal,
     end: doc.end ?? null,
-    options: {
-      vision: doc.options.vision,
-      reasoning: doc.options.reasoning,
-      maxSteps: doc.options.maxSteps,
-    },
+    options: toTaskOptions(doc.options),
     variables: doc.variables.map((v) => ({ key: v.key, value: v.value })),
     createdAt: doc.createdAt.toISOString(),
     updatedAt: doc.updatedAt.toISOString(),

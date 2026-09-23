@@ -40,6 +40,9 @@ services:
       MONGODB_DB: ${MONGODB_DB:-mobilerun}
       # The provider key for the models in /config/config.yaml.
       OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:-}
+      # Optional: enables the TypeSafe Jev agent.
+      TYPESAFE_API_KEY: ${TYPESAFE_API_KEY:-}
+      TYPESAFE_MODEL: ${TYPESAFE_MODEL:-jev-latest}
       # --- Option B: host adb server (macOS / Windows / Linux) ---------------
       # The executor (async_adbutils) reads the first two; the `adb` CLI inside
       # the container (`docker exec mobilerun adb devices`) reads the third.
