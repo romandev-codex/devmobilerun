@@ -136,8 +136,10 @@ describe("run now", () => {
       deviceSerial: "emulator-5554",
       taskName: "Inbox",
       startUrl: "https://mail.example.com",
-      instruction:
-        "Read the newest mail\n\nWhen the goal is done, finally: Go home",
+      // The end step is not part of the prompt: the executor runs it as a
+      // phase of its own, so the goal cannot spend its steps on it or skip it.
+      instruction: "Read the newest mail",
+      endInstruction: "Go home",
       options: { vision: true, reasoning: false, maxSteps: 9 },
       variables: { account: "work" },
     })
@@ -159,6 +161,7 @@ describe("run now", () => {
     expect(body.run.instruction).toBe(
       "First: Unlock the phone\n\nRead the newest mail"
     )
+    expect(body.run.endInstruction).toBeNull()
   })
 
   it("refuses when the device is busy, offline or unknown", async () => {
@@ -241,6 +244,9 @@ describe("executeRun", () => {
       runId: body.run.id,
       deviceSerial: "emulator-5554",
       startUrl: "https://mail.example.com",
+      instruction: "Read the newest mail",
+      // The executor runs this after the goal, however the goal ended.
+      endInstruction: "Go home",
       options: { vision: true, reasoning: false, maxSteps: 9 },
       variables: { account: "work" },
     })

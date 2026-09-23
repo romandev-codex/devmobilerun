@@ -31,6 +31,8 @@ export type StartRunRequest = {
   deviceSerial: string
   instruction: string
   startUrl?: string | null
+  /** The task's closing step; the executor runs it after the goal, whatever the goal did. */
+  endInstruction?: string | null
   options: { vision: boolean; reasoning: boolean; maxSteps: number }
   variables: Record<string, string>
   prompts?: Record<string, string>

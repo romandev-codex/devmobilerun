@@ -47,6 +47,16 @@ export default async function RunPage({
             <pre className="mt-2 rounded bg-muted p-2 text-xs whitespace-pre-wrap">
               {run.instruction}
             </pre>
+            {run.endInstruction ? (
+              <>
+                <p className="mt-2 text-xs text-muted-foreground">
+                  Run as a final step after the goal, whatever the goal did:
+                </p>
+                <pre className="mt-1 rounded bg-muted p-2 text-xs whitespace-pre-wrap">
+                  {run.endInstruction}
+                </pre>
+              </>
+            ) : null}
           </details>
           {Object.keys(run.prompts).length > 0 || run.appCards.length > 0 ? (
             <details className="text-sm">

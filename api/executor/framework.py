@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import base64
 import re
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Any, AsyncIterator, Protocol
 
 from .events import RunEvent
@@ -40,6 +40,8 @@ class RunSpec:
     device_serial: str
     instruction: str
     start_url: str | None = None
+    """The task's closing step, run after the goal whatever the goal did."""
+    end_instruction: str | None = None
     vision: bool = False
     reasoning: bool = False
     max_steps: int = 15
@@ -47,6 +49,14 @@ class RunSpec:
     prompts: dict[str, str] = field(default_factory=dict)
     app_cards: list[dict[str, Any]] = field(default_factory=list)
     memory: dict[str, str] = field(default_factory=dict)
+    """Where this phase starts numbering screenshots; set for the end phase so
+    its steps continue the goal's rather than restarting at zero."""
+    step_offset: int = 0
+
+
+#: The end step is cleanup, not a second goal, so it gets a small budget of its
+#: own — a task that spent every step on the goal can still be tidied up.
+END_PHASE_MAX_STEPS = 10
 
 
 class DeviceNotFound(Exception):
@@ -275,6 +285,41 @@ def compose_goal(spec: RunSpec) -> str:
     return goal + "\n\nApp guidance:\n" + "\n\n".join(sections)
 
 
+def compose_end_instruction(spec: RunSpec) -> str:
+    """The goal for the end phase.
+
+    The end step runs as its own agent session, so it is given the finished task
+    as context — an instruction like "report the total" means nothing on its own
+    — together with the standing that the task itself is over. How the goal ended
+    is deliberately left open: the step is owed either way.
+    """
+    return (
+        "An earlier agent session on this device worked on the task below.\n\n"
+        f"{spec.instruction.strip()}\n\n"
+        "That work is finished and is no longer yours to continue — it may have "
+        "succeeded, failed, or run out of steps. Carry out only this final "
+        f"step, then stop:\n\n{(spec.end_instruction or '').strip()}"
+    )
+
+
+def end_phase_spec(spec: RunSpec, step_offset: int = 0) -> RunSpec:
+    """The spec for the end phase, derived from the run it closes.
+
+    It keeps the device, agent options, variables, prompts, cards and memory of
+    the run, and drops what belongs to the goal alone: the start URL (already
+    opened), the end instruction itself (it is now the goal) and most of the
+    step budget.
+    """
+    return replace(
+        spec,
+        instruction=compose_end_instruction(spec),
+        start_url=None,
+        end_instruction=None,
+        max_steps=max(1, min(spec.max_steps, END_PHASE_MAX_STEPS)),
+        step_offset=step_offset,
+    )
+
+
 class MobilerunAgentRun:
     """Drives a real MobileAgent and yields normalized events."""
 
@@ -329,7 +374,7 @@ class MobilerunAgentRun:
             agent = await asyncio.to_thread(build)
             handler = agent.run()
             self._handler = handler
-            step_counter = [0]
+            step_counter = [spec.step_offset]
             async for raw in handler.stream_events():
                 mapped = map_framework_event(raw, step_counter)
                 if mapped is not None:

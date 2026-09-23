@@ -25,6 +25,7 @@ export type RunView = {
   trigger: "manual" | "schedule"
   instruction: string
   startUrl: string | null
+  endInstruction: string | null
   options: { vision: boolean; reasoning: boolean; maxSteps: number }
   variables: Record<string, string>
   prompts: Record<string, string>
@@ -55,6 +56,7 @@ export function toRunView(doc: RunDoc): RunView {
     trigger: doc.trigger,
     instruction: doc.instruction ?? "",
     startUrl: doc.startUrl ?? null,
+    endInstruction: doc.endInstruction ?? null,
     options: doc.options,
     variables: (doc.variables as Record<string, string>) ?? {},
     prompts: (doc.prompts as Record<string, string>) ?? {},
@@ -95,7 +97,7 @@ function runFields(
   deviceSerial: string,
   scheduleId: string | null
 ) {
-  const { instruction, startUrl } = composeInstruction(task)
+  const { instruction, startUrl, endInstruction } = composeInstruction(task)
   return {
     taskId: new mongoose.Types.ObjectId(task.id),
     taskName: task.name,
@@ -103,6 +105,7 @@ function runFields(
     deviceSerial,
     instruction,
     startUrl,
+    endInstruction,
     options: task.options,
     variables: Object.fromEntries(task.variables.map((v) => [v.key, v.value])),
   }
@@ -359,9 +362,9 @@ export async function listRuns(query: unknown): Promise<RunPage> {
   if (q.status) filter.status = q.status
   if (q.trigger) filter.trigger = q.trigger
   if (q.before) filter._id = { $lt: asObjectId(q.before) }
-  // Lists never render the prompt/app card snapshots or the instruction; skip them.
+  // Lists never render the prompt/app card snapshots or the instructions; skip them.
   const docs = await Run.find(filter)
-    .select("-prompts -appCards -instruction")
+    .select("-prompts -appCards -instruction -endInstruction")
     .sort({ _id: -1 })
     .limit(q.limit + 1)
     .lean<RunDoc[]>()

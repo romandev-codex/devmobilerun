@@ -38,6 +38,8 @@ const runSchema = new Schema(
     trigger: { type: String, enum: ["manual", "schedule"], required: true },
     instruction: { type: String, required: true },
     startUrl: { type: String, default: null },
+    /** The task's closing step, run after the goal whatever the goal did. */
+    endInstruction: { type: String, default: null },
     options: { type: runOptionsSchema, required: true },
     variables: { type: Schema.Types.Mixed, default: {} },
     /** Global prompt overrides and app cards the run was started with. */

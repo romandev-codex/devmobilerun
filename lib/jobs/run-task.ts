@@ -90,6 +90,7 @@ export async function executeRun(runId: string): Promise<void> {
       deviceSerial: run.deviceSerial,
       instruction: run.instruction,
       startUrl: run.startUrl,
+      endInstruction: run.endInstruction,
       options: run.options,
       variables: (run.variables as Record<string, string>) ?? {},
       prompts: settings.prompts,

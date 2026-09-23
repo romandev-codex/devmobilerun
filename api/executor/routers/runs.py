@@ -31,6 +31,7 @@ class StartRunRequest(BaseModel):
     deviceSerial: str = Field(min_length=1)
     instruction: str = Field(min_length=1)
     startUrl: str | None = None
+    endInstruction: str | None = None
     options: RunOptions = Field(default_factory=RunOptions)
     variables: dict[str, str] = Field(default_factory=dict)
     prompts: dict[str, str] = Field(default_factory=dict)
@@ -51,6 +52,7 @@ async def start_run(body: StartRunRequest, runs: RunManager = Depends(get_run_ma
         device_serial=body.deviceSerial,
         instruction=body.instruction,
         start_url=body.startUrl,
+        end_instruction=body.endInstruction,
         vision=body.options.vision,
         reasoning=body.options.reasoning,
         max_steps=body.options.maxSteps,

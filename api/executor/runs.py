@@ -16,7 +16,7 @@ from dataclasses import dataclass, field
 from typing import AsyncIterator
 
 from .events import RunEvent
-from .framework import AgentRun, DeviceNotFound, Framework, RunSpec
+from .framework import AgentRun, DeviceNotFound, Framework, RunSpec, end_phase_spec
 
 logger = logging.getLogger(__name__)
 
@@ -161,18 +161,27 @@ class RunManager:
 
     async def _execute(self, run: ActiveRun) -> None:
         spec = run.spec
+        # Screenshot numbering carried across phases so the end step continues
+        # the goal's steps instead of restarting at zero.
+        progress = [0]
         try:
             if spec.start_url:
                 await self._framework.open_url(spec.device_serial, spec.start_url)
                 run.publish(RunEvent("log", {"message": f"Opened {spec.start_url}"}))
-            agent_run = self._framework.create_run(spec)
-            run.agent_run = agent_run
-            run.publish(RunEvent("started", {"runId": spec.run_id, "device": spec.device_serial}))
-            async for event in agent_run.events():
-                run.publish(event)
-                if event.terminal:
-                    return
-            run.publish(RunEvent("error", {"message": "Agent finished without a result"}))
+            try:
+                terminal = await self._stream_phase(run, spec, progress, publish_started=True)
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:  # the end step still owes the device its cleanup
+                logger.exception("run %s failed", spec.run_id)
+                terminal = RunEvent("error", {"message": f"{type(exc).__name__}: {exc}"})
+            if terminal is None:
+                terminal = RunEvent("error", {"message": "Agent finished without a result"})
+            # A stop request is the one outcome the end step does not follow:
+            # whoever pressed it wants the device back now.
+            if spec.end_instruction and not run.cancel_requested:
+                await self._run_end_phase(run, progress)
+            run.publish(terminal)
         except asyncio.CancelledError:
             run.publish(RunEvent("cancelled", {}))
         except Exception as exc:  # noqa: BLE001 - surface any failure to the subscriber
@@ -181,6 +190,67 @@ class RunManager:
         finally:
             if not run.done:
                 run.publish(RunEvent("error", {"message": "Run ended unexpectedly"}))
+
+    async def _stream_phase(
+        self,
+        run: ActiveRun,
+        spec: RunSpec,
+        progress: list[int],
+        *,
+        publish_started: bool = False,
+    ) -> RunEvent | None:
+        """Drives one agent phase, publishing everything it emits but its ending.
+
+        The terminal event is returned rather than published: a run has exactly
+        one ending, and with an end step the goal's phase is not it. ``progress``
+        is advanced past the screenshots this phase produced.
+        """
+        if publish_started:
+            run.publish(RunEvent("started", {"runId": spec.run_id, "device": spec.device_serial}))
+        agent_run = self._framework.create_run(spec)
+        run.agent_run = agent_run
+        async for event in agent_run.events():
+            if event.terminal:
+                return event
+            run.publish(event)
+            if event.type == "screenshot":
+                step = event.payload.get("step")
+                if isinstance(step, int):
+                    progress[0] = max(progress[0], step + 1)
+        return None
+
+    async def _run_end_phase(self, run: ActiveRun, progress: list[int]) -> None:
+        """Runs the task's closing step after the goal, however the goal ended.
+
+        The step is what the task owes the device — closing an app, returning
+        home, reporting a total — so a failed or step-exhausted goal reaches it
+        just as a successful one does. Its own outcome is published as a log
+        line: the run's result belongs to the goal.
+        """
+        spec = end_phase_spec(run.spec, step_offset=progress[0])
+        run.publish(RunEvent("log", {"message": "Running the task's end step"}))
+        try:
+            terminal = await self._stream_phase(run, spec, progress)
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:  # the goal's result must still be reported
+            logger.exception("end step of run %s failed", spec.run_id)
+            terminal = RunEvent("error", {"message": f"{type(exc).__name__}: {exc}"})
+        if terminal is None:
+            run.publish(RunEvent("log", {"message": "End step ended without a result", "success": False}))
+        elif terminal.type == "result":
+            run.publish(
+                RunEvent(
+                    "log",
+                    {
+                        "message": f"End step: {terminal.payload.get('reason', '')}",
+                        "success": bool(terminal.payload.get("success")),
+                    },
+                )
+            )
+        else:
+            message = terminal.payload.get("message") or terminal.type
+            run.publish(RunEvent("log", {"message": f"End step did not finish: {message}", "success": False}))
 
     # ── streaming ──────────────────────────────────────────────────────
     async def subscribe(

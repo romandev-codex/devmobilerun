@@ -171,6 +171,11 @@ export function TaskForm({ task }: { task?: TaskView }) {
               onChange={(e) => set("end", e.target.value)}
               placeholder="Close the app and return to the home screen"
             />
+            <p className="text-xs text-muted-foreground">
+              Performed as a separate last step once the goal is over — whether
+              it succeeded, failed or ran out of steps. It does not decide
+              whether the run succeeded.
+            </p>
           </div>
         </CardContent>
       </Card>
