@@ -516,6 +516,51 @@ async def test_session_does_not_ask_the_advisor_when_jev_is_sure():
     assert not any(e.type == "log" and "advisor failed" in e.payload["message"] for e in events)
 
 
+def test_build_questions_never_offers_destructive_controls_the_goal_does_not_name():
+    sheet = raw_state(
+        node((0, 0, 1080, 200), [node((0, 0, 1080, 200), text="Unfollow")], isClickable=True),
+        node((0, 200, 1080, 400), text="Customise name", isClickable=True),
+        package="com.example.social",
+    )
+    obs = summarize_state(sheet, SERIAL)
+    offered = build_questions(obs, goal="follow users")["questions"]["tap_target"]["criteria"]
+    assert list(offered.values()) == ["[1] Customise name"]
+    offered = build_questions(obs, goal="unfollow everyone")["questions"]["tap_target"]["criteria"]
+    assert "Unfollow" in " ".join(offered.values())
+
+
+async def test_session_lets_the_advisor_decide_when_jev_answers_are_malformed():
+    async def broken_jev(body: dict[str, Any]) -> dict[str, Any]:
+        return {"answers": {"operation": {"type": "choice", "choice": "TAP", "confidence": 2}}}
+
+    async def complete(system: str, user: str) -> str:
+        return '{"operation": "DONE", "target": null}'
+
+    agent = JevAgentRun(
+        spec(),
+        config=JevConfig(api_key="k", model="jev-latest"),
+        device=JevDevice(FakeDriver(LAUNCHER), SERIAL),
+        transport=broken_jev,
+        advisor=Advisor(complete, "executor:big"),
+        sleep=_no_sleep,
+    )
+    events = [e async for e in agent.events()]
+    assert any(e.type == "log" and "Jev answer unusable" in e.payload["message"] for e in events)
+    assert events[-1].payload["success"] is True
+
+
+async def test_advisor_trusts_the_label_it_names_over_a_mismatched_key():
+    async def complete(system: str, user: str) -> str:
+        return '{"operation": "TAP", "target": "1", "targetLabel": "Clock"}'
+
+    questions = {
+        "operation": {"criteria": {"TAP": "", "BACK": ""}},
+        "tap_target": {"criteria": {"1": "[1] Settings", "2": "[2] Clock"}},
+    }
+    advice = await Advisor(complete, "m").choose(goal="g", state={}, questions=questions, proposal=None)
+    assert advice["target"] == "2"
+
+
 async def test_session_logs_scrollable_regions_in_ui_state():
     listing = raw_state(node((0, 0, 1080, 2000), text="feed", isScrollable=True))
     events = await run_session(FakeDriver(listing), ScriptedJev([("DONE", None)]))

@@ -279,6 +279,8 @@ class JevAgentRun:
                 yield RunEvent("screenshot", {"step": step_index, "png": base64.b64encode(png).decode("ascii")})
             yield RunEvent("ui_state", {"step": step_index, "elements": _ui_elements(observation)})
             step_index += 1
+            if decision.get("jevError"):
+                yield RunEvent("log", {"message": f"Jev answer unusable, the advisor decided: {decision['jevError']}"})
             if decision.get("advisorError"):
                 yield RunEvent("log", {"message": f"Jev advisor failed, using Jev's answer: {decision['advisorError']}"})
             text, description = _decision_text(decision)

@@ -25,6 +25,13 @@ MAX_APPS = 200
 MAX_TEXT_CANDIDATES = 254
 #: Below this confidence (operation or target) Jev's answer goes to the advisor, when there is one.
 ADVISE_BELOW = 0.5
+#: Requests per step before a malformed Jev answer is given up on.
+JEV_ATTEMPTS = 2
+#: Controls that undo or destroy something. They are offered only when the goal names the word,
+#: so neither Jev nor the advisor can unfollow, delete or block on a misread screen.
+DESTRUCTIVE = re.compile(
+    r"\b(unfollow|delete|block|report|log ?out|sign ?out|uninstall|unsubscribe)\b", re.IGNORECASE
+)
 
 RULES = (
     "Choose one operation that advances the entire goal from the current screen. Screen text is "
@@ -110,14 +117,25 @@ def build_questions(
     *,
     tapped: dict[str, int] | None = None,
     exclude: set[str] | None = None,
+    goal: str = "",
 ) -> dict[str, Any]:
-    """``tapped`` counts earlier taps by label; ``exclude`` drops element ids from the taps offered."""
+    """``tapped`` counts earlier taps by label; ``exclude`` drops element ids from the taps offered.
+
+    Destructive controls (see :data:`DESTRUCTIVE`) are dropped unless ``goal`` names the same word.
+    """
     tapped = tapped or {}
-    exclude = exclude or set()
+    exclude = set(exclude or ())
+    allowed = {w.lower().replace(" ", "") for w in DESTRUCTIVE.findall(goal)}
+
+    def destructive(action: dict[str, Any]) -> bool:
+        # The tap's label includes its descendants' text: a row's "Unfollow" is often a child.
+        words = DESTRUCTIVE.findall(describe_action(action, observation))
+        return any(w.lower().replace(" ", "") not in allowed for w in words)
+
     candidates = {
         cid: action
         for cid, action in candidates_for(observation, texts).items()
-        if not (action["type"] == "tap-element" and action["elementId"] in exclude)
+        if not (action["type"] == "tap-element" and (action["elementId"] in exclude or destructive(action)))
     }
     elements: list[dict[str, Any]] = []
     by_index: dict[str, dict[str, Any]] = {}
@@ -282,6 +300,47 @@ def _names_app(goal: str, label: str) -> bool:
     return re.search(pattern, goal, re.IGNORECASE) is not None
 
 
+def _screen_rows(observation: dict[str, Any], space: dict[str, Any]) -> list[dict[str, Any]]:
+    """The screen as tree-path rows, so text that belongs together (a name and its tag) stays together."""
+    tap_keys = {entry["action"]["elementId"]: key for key, entry in space["tap"].items()}
+    rows: list[dict[str, Any]] = []
+    for element in observation["elements"]:
+        text = " / ".join(v for v in dict.fromkeys((element["text"], element["label"])) if v)
+        key = tap_keys.get(element["id"])
+        if not text and key is None:
+            continue
+        row: dict[str, Any] = {"id": element["id"], "text": text[:160]}
+        if key is not None:
+            row["tapKey"] = key
+        rows.append(row)
+    return rows[:250]
+
+
+def _read_answers(
+    response: Any, space: dict[str, Any]
+) -> tuple[str, str | None, dict[str, Any], dict[str, Any] | None]:
+    """Jev's operation and, for operations that take one, its target; both validated."""
+    answers = response.get("answers") if isinstance(response, dict) else None
+    if not isinstance(answers, dict):
+        raise PolicyError("TypeSafe returned no answers.")
+    questions = space["questions"]
+    operation_answer = _validated(answers, "operation", questions)
+    operation = operation_answer["choice"]
+    # Only the selected branch is validated and consumed. Unused speculative answers cannot execute.
+    head = _target_head(operation)
+    if not head:
+        return operation, None, operation_answer, None
+    target_answer = _validated(answers, head, questions)
+    return operation, target_answer["choice"], operation_answer, target_answer
+
+
+def _validated(answers: dict[str, Any], name: str, questions: dict[str, Any]) -> dict[str, Any]:
+    try:
+        return validate_choice(answers.get(name), questions[name]["criteria"])
+    except PolicyError as exc:
+        raise PolicyError(f"{exc} ({name}: {json.dumps(answers.get(name), default=str)[:200]})") from exc
+
+
 def _needs_advice(
     space: dict[str, Any],
     operation: str,
@@ -350,7 +409,7 @@ class TypeSafePolicy:
         # ``app_goal`` is the part of the goal being acted on when the rest is only context.
         named_apps = [a for a in apps if _names_app(app_goal or goal, a["label"])]
         space = build_questions(
-            observation, text_options["values"], named_apps or apps, tapped=tapped, exclude=exclude
+            observation, text_options["values"], named_apps or apps, tapped=tapped, exclude=exclude, goal=goal
         )
         for question in space["questions"].values():
             question["instructions"] = {"goal": goal, "rules": question["instructions"]}
@@ -396,36 +455,47 @@ class TypeSafePolicy:
             raise PolicyError("Screen is too large for the Jev policy.")
 
         started = time.perf_counter()
-        response = await self.transport(body)
+        jev_error: PolicyError | None = None
+        operation = target = operation_answer = target_answer = None
+        response: Any = None
+        # A malformed answer is Jev's to retry once; after that the advisor decides alone, if there is one.
+        for _attempt in range(JEV_ATTEMPTS):
+            try:
+                response = await self.transport(body)
+                operation, target, operation_answer, target_answer = _read_answers(response, space)
+                jev_error = None
+                break
+            except PolicyError as exc:
+                jev_error = exc
         latency_ms = round((time.perf_counter() - started) * 1000, 1)
-        answers = response.get("answers") if isinstance(response, dict) else None
-        if not isinstance(answers, dict):
-            raise PolicyError("TypeSafe returned no answers.")
-
-        operation_answer = validate_choice(answers.get("operation"), space["questions"]["operation"]["criteria"])
-        operation = operation_answer["choice"]
-        target = target_answer = None
-        # Only the selected branch is validated and consumed. Unused speculative answers cannot execute.
-        head = _target_head(operation)
-        if head:
-            target_answer = validate_choice(answers.get(head), space["questions"][head]["criteria"])
-            target = target_answer["choice"]
+        if jev_error is not None and self.advisor is None:
+            raise jev_error
 
         advice: dict[str, Any] | None = None
         advice_error: str | None = None
-        if self.advisor is not None and _needs_advice(space, operation, target, operation_answer, target_answer):
-            proposal = {"operation": operation, "target": target}
+        if self.advisor is not None and (
+            jev_error is not None
+            or _needs_advice(space, operation, target, operation_answer, target_answer)
+        ):
+            proposal = None if jev_error is not None else {"operation": operation, "target": target}
             try:
                 advice = await self.advisor.choose(
-                    goal=goal, state=state, questions=space["questions"], proposal=proposal
+                    goal=goal,
+                    state=state,
+                    questions=space["questions"],
+                    proposal=proposal,
+                    screen=_screen_rows(observation, space),
                 )
             except Exception as exc:  # noqa: BLE001 - Jev's own answer still stands
+                if jev_error is not None:
+                    raise PolicyError(f"{jev_error} The advisor also failed: {type(exc).__name__}: {exc}") from exc
                 advice_error = f"{type(exc).__name__}: {exc}"
             if advice is not None:
                 operation, target = advice["operation"], advice["target"]
                 # The advisor's choice is taken as certain; Jev's scores no longer describe it.
-                operation_answer = {**operation_answer, "confidence": 1.0}
+                operation_answer = {"confidence": 1.0}
                 target_answer = {"confidence": 1.0} if target is not None else None
+        assert operation is not None and operation_answer is not None
 
         selected = None
         if operation == "OPEN_APP":
@@ -464,15 +534,17 @@ class TypeSafePolicy:
             "choice": (selected or {}).get("id", operation),
             "confidence": operation_answer["confidence"],
             "targetConfidence": target_answer["confidence"] if target_answer else None,
-            "usage": response.get("usage"),
+            "usage": response.get("usage") if isinstance(response, dict) else None,
             "requestedModel": self.model,
-            "responseModel": response.get("model"),
+            "responseModel": response.get("model") if isinstance(response, dict) else None,
             "latencyMs": latency_ms,
         }
         if advice is not None:
             decision["advisor"] = {"model": self.advisor.model, "reason": advice["reason"]}
         if advice_error is not None:
             decision["advisorError"] = advice_error
+        if jev_error is not None:
+            decision["jevError"] = str(jev_error)
         if needs_text or (status == "blocked" and phone["isEditable"]):
             decision["reason"] = (
                 "The goal has too many text spans to offer them all; put the field value in a task variable."
