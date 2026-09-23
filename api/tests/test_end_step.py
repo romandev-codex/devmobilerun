@@ -29,6 +29,7 @@ def test_end_phase_spec_keeps_the_run_and_drops_what_belonged_to_the_goal():
     assert end.instruction.rstrip().endswith("Close the app")
     assert end.start_url is None  # already opened for the goal
     assert end.end_instruction is None  # it is the goal now; no third phase
+    assert end.focus == "Close the app"  # the goal text is context; this is what to act on
     assert end.max_steps == END_PHASE_MAX_STEPS
     assert end.step_offset == 6
     assert (end.device_serial, end.vision) == ("emulator-5554", True)

@@ -210,7 +210,10 @@ def build_questions(
         }
 
     def element_label(index: str) -> str:
-        return f"[{index}] {by_index[index]['label']}"
+        entry = by_index[index]
+        # State belongs in the option itself: tapping a selected tab or checked box again rarely progresses.
+        state = [s for s, on in (("selected", entry.get("selected")), ("checked", entry.get("checked"))) if on]
+        return f"[{index}] {entry['label']}{' (' + ', '.join(state) + ')' if state else ''}"
 
     if app:
         questions["app_target"] = target_question(
@@ -288,6 +291,7 @@ class TypeSafePolicy:
         texts: list[str] | None = None,
         apps: list[dict[str, str]] | None = None,
         context: dict[str, Any] | None = None,
+        app_goal: str | None = None,
     ) -> dict[str, Any]:
         if not isinstance(goal, str) or not goal.strip():
             raise PolicyError("A nonempty goal is required.")
@@ -295,7 +299,8 @@ class TypeSafePolicy:
         apps = apps or []
         text_options = text_candidates(goal, texts)
         # Exact app-name lookup narrows discovery; Jev still selects operation and target.
-        named_apps = [a for a in apps if _names_app(goal, a["label"])]
+        # ``app_goal`` is the part of the goal being acted on when the rest is only context.
+        named_apps = [a for a in apps if _names_app(app_goal or goal, a["label"])]
         space = build_questions(observation, text_options["values"], named_apps or apps)
         for question in space["questions"].values():
             question["instructions"] = {"goal": goal, "rules": question["instructions"]}

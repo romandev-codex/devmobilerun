@@ -64,6 +64,9 @@ class RunSpec:
     """Where this phase starts numbering screenshots; set for the end phase so
     its steps continue the goal's rather than restarting at zero."""
     step_offset: int = 0
+    """The part of ``instruction`` this phase acts on when the rest is context;
+    the end phase sets it to the end instruction."""
+    focus: str | None = None
 
 
 #: The end step is cleanup, not a second goal, so it gets a small budget of its
@@ -338,6 +341,7 @@ def end_phase_spec(spec: RunSpec, step_offset: int = 0) -> RunSpec:
         instruction=compose_end_instruction(spec),
         start_url=None,
         end_instruction=None,
+        focus=spec.end_instruction,
         max_steps=max(1, min(spec.max_steps, END_PHASE_MAX_STEPS)),
         step_offset=step_offset,
     )

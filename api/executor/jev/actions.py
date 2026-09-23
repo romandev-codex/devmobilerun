@@ -69,6 +69,34 @@ def candidates_for(observation: dict[str, Any], texts: list[str] | None = None) 
     return actions
 
 
+def _collection_position(observation: dict[str, Any], element_id: str) -> str | None:
+    """``item 2 of 6`` when the element is one of several like controls in a list or grid.
+
+    Feeds and galleries label their tiles with counts or not at all; their
+    shared resource id under one parent is what marks them as items.
+    """
+    target = find_element(observation, element_id)
+    if not target or not target["clickable"] or not target["resourceId"] or "." not in element_id:
+        return None
+    parent = element_id.rsplit(".", 1)[0]
+    items = [
+        e["id"]
+        for e in observation["elements"]
+        if e["id"].rsplit(".", 1)[0] == parent and e["clickable"] and e["resourceId"] == target["resourceId"]
+    ]
+    if len(items) < 2:
+        return None
+    return f"item {items.index(element_id) + 1} of {len(items)} in a list"
+
+
+def _unlabeled(target: dict[str, Any] | None) -> str:
+    """Where an unlabeled control sits, since its tree path means nothing to Jev."""
+    if target is None:
+        return "unlabeled control"
+    b = target["bounds"]
+    return f"unlabeled control at ({int(b['left'] + b['right']) // 2}, {int(b['top'] + b['bottom']) // 2})"
+
+
 def describe_action(action: dict[str, Any], observation: dict[str, Any]) -> str:
     kind = action.get("type")
     if kind == "open-app":
@@ -85,7 +113,10 @@ def describe_action(action: dict[str, Any], observation: dict[str, Any]) -> str:
                 for value in (e["text"], e["label"]):
                     if value and value not in labels:
                         labels.append(value)
-        return f"Tap {' / '.join(labels) or element_id}."
+        position = _collection_position(observation, element_id)
+        if position:
+            return f"Tap {position}{': ' + ' / '.join(labels) if labels else ''}."
+        return f"Tap {' / '.join(labels) or _unlabeled(target)}."
     if kind == "swipe":
         if action["startY"] > action["endY"]:
             direction = "down"

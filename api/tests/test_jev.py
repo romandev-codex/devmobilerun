@@ -214,6 +214,30 @@ def test_build_questions_offers_taps_apps_and_controls():
     assert space["questions"]["app_target"]["criteria"] == {"1": "Settings (com.android.settings)"}
 
 
+def test_build_questions_names_list_items_by_position_and_never_by_tree_path():
+    grid = raw_state(
+        node((0, 0, 1080, 120), text="Posts 11", isClickable=True, isSelected=True),
+        node(
+            (0, 120, 1080, 1200),
+            [
+                node((0, 120, 360, 600), [node((0, 540, 360, 590), text="1.6M")], resourceId="app:id/tile", isClickable=True),
+                node((360, 120, 720, 600), resourceId="app:id/tile", isClickable=True),
+                node((720, 120, 1080, 600), resourceId="app:id/tile", isClickable=True),
+            ],
+        ),
+        node((0, 1200, 100, 1300), resourceId="app:id/k9w", isClickable=True),
+        package="com.example.gallery",
+    )
+    criteria = build_questions(summarize_state(grid, SERIAL))["questions"]["tap_target"]["criteria"]
+    assert criteria == {
+        "1": "[1] Posts 11 (selected)",
+        "2": "[2] item 1 of 3 in a list: 1.6M",
+        "3": "[3] item 2 of 3 in a list",
+        "4": "[4] item 3 of 3 in a list",
+        "5": "[5] unlabeled control at (50, 1250)",
+    }
+
+
 def test_text_candidates_put_supplied_values_first_and_strip_punctuation():
     result = text_candidates('Search for "Berlin".', ["alice@example.com"])
     assert result["values"][0] == "alice@example.com"
@@ -264,6 +288,22 @@ async def test_policy_narrows_apps_to_those_named_in_the_goal():
         "packageName": "com.android.deskclock",
         "appLabel": "Clock",
     }
+
+
+async def test_policy_narrows_apps_by_the_focus_when_the_goal_is_only_context():
+    jev = ScriptedJev([("HOME", None)])
+    apps = [
+        {"packageName": "com.android.settings", "label": "Settings"},
+        {"packageName": "com.android.deskclock", "label": "Clock"},
+    ]
+    obs = summarize_state(LAUNCHER, SERIAL)
+    await TypeSafePolicy(jev).decide(
+        goal="Earlier: set an alarm in Clock. Now: go to the home screen",
+        observation=obs,
+        apps=apps,
+        app_goal="Go to the home screen",
+    )
+    assert len(jev.bodies[0]["questions"]["app_target"]["criteria"]) == 2  # Clock is not singled out
 
 
 # ── session ──────────────────────────────────────────────────────────────
@@ -374,6 +414,32 @@ async def test_session_stops_at_the_step_limit():
     events = await run_session(driver, jev, max_steps=2)
     assert len(driver.actions) == 2
     assert events[-1].payload == {"success": False, "reason": "Reached the step limit.", "steps": 2}
+
+
+async def test_session_stops_when_an_action_leaves_the_screen_unchanged_twice():
+    driver = FakeDriver(LAUNCHER)  # tapping Clock does nothing
+    events = await run_session(driver, ScriptedJev([("TAP", "Clock"), ("TAP", "Clock")]))
+    assert len(driver.actions) == 1
+    assert events[-1].payload["reason"].startswith("Jev repeated an action on an unchanged screen.")
+
+
+async def test_session_repeats_an_action_on_a_screen_it_returns_to():
+    def navigate(driver: FakeDriver, action: tuple) -> None:
+        driver.state = SETTINGS if action == ("tap", 270, 200) else LAUNCHER
+
+    driver = FakeDriver(LAUNCHER, navigate)
+    jev = ScriptedJev([("TAP", "Settings"), ("BACK", None), ("TAP", "Settings"), ("DONE", None)])
+    events = await run_session(driver, jev)
+    assert driver.actions == [("tap", 270, 200), ("button", "back"), ("tap", 270, 200)]
+    assert events[-1].payload["success"] is True
+
+
+async def test_session_narrows_apps_by_the_spec_focus():
+    jev = ScriptedJev([("DONE", None)])
+    await run_session(
+        FakeDriver(LAUNCHER), jev, instruction="Earlier: open Clock. Now: go home", focus="Go home"
+    )
+    assert len(jev.bodies[0]["questions"]["app_target"]["criteria"]) == 2
 
 
 async def test_session_reports_a_failed_action_without_retrying():

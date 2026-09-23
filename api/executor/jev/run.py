@@ -202,6 +202,7 @@ class JevAgentRun:
 
         step_index = spec.step_offset
         history: list[dict[str, Any]] = []
+        # Actions already tried on the current screen; cleared whenever the screen changes.
         repeated: set[str] = set()
         consecutive_waits = consecutive_stale = 0
         waiting_since: float | None = None
@@ -237,6 +238,7 @@ class JevAgentRun:
                     texts=texts,
                     apps=installed_apps,
                     context=context,
+                    app_goal=spec.focus,
                 ),
                 screenshot(),
             )
@@ -336,5 +338,8 @@ class JevAgentRun:
                 await self._sleep(POLL_S)
                 after = await device.observe()
             entry["screenChanged"] = after["fingerprint"] != observation["fingerprint"]
+            if entry["screenChanged"]:
+                # Returning to an earlier screen and repeating an action there is progress, not a loop.
+                repeated.clear()
             observation = after
         yield result("decision_limit")
