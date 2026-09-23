@@ -26,7 +26,7 @@ export function DeviceCard({
 }) {
   const fallback = device.model || device.serial
   return (
-    <Card className="gap-3">
+    <Card className="w-full max-w-sm gap-3">
       <CardHeader className="flex items-start justify-between gap-2">
         <div className="min-w-0">
           <DeviceNameEditor
