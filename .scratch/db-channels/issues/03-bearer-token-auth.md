@@ -4,7 +4,7 @@
 
 **Blocked by:** 02 Worker queue API
 
-**Status:** ready-for-agent
+**Status:** done
 
 - [ ] `DB_API_TOKEN` added as an optional entry in the env schema and documented in the env example file
 - [ ] `unauthorized` added to the shared error-code union; a small helper called at the top of every `/api/db` handler (operator and worker routes alike) enforces the token, no global middleware

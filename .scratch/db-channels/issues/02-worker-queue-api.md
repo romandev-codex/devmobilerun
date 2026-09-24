@@ -4,7 +4,7 @@
 
 **Blocked by:** 01 Create, list and delete channels
 
-**Status:** ready-for-agent
+**Status:** done
 
 - [ ] Routes under `/api/db/{channel}`: `GET|POST /get`, `POST /add`, `PATCH|POST /set/{id}`, `POST /undo/{id}`; responses use `{ record }` / `{ records }` envelopes and records are serialised as `{ id, channel, status, data, result, claimedAt, createdAt, updatedAt }`
 - [ ] `get` uses a single atomic find-and-update sorted by `_id` ascending; `undo` requires status `processing` and answers `409 conflict` otherwise; `set` validates status against the closed enum and requires at least one of `status` / `result`

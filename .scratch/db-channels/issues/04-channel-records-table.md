@@ -4,7 +4,7 @@
 
 **Blocked by:** 02 Worker queue API
 
-**Status:** ready-for-agent
+**Status:** done
 
 - [ ] Operator API: list records for a channel with `status` filter and pagination (page size and page or cursor), get one record, per-status counts included in the channel list and channel detail responses
 - [ ] Channel list page shows pending / processing / done / failed counts per channel

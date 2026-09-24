@@ -4,7 +4,7 @@
 
 **Blocked by:** 04 Browse a channel's records
 
-**Status:** ready-for-agent
+**Status:** done
 
 - [ ] Operator API: update a record's `data` and/or `status`, delete one record, bulk reset `processing` to `pending`, bulk delete by status, clear channel; all scoped to the channel in the path so a record id from another channel answers `404 not_found`
 - [ ] Record dialog gains an editable JSON textarea for `data` (invalid JSON blocks save with a message), a status select, and a delete button with confirmation

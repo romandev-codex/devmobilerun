@@ -5,6 +5,7 @@ import { usePathname } from "next/navigation"
 import {
   BookText,
   CalendarClock,
+  Database,
   ListChecks,
   Play,
   Settings,
@@ -19,6 +20,7 @@ const items = [
   { href: "/schedules", label: "Schedules", icon: CalendarClock },
   { href: "/runs", label: "Runs", icon: Play },
   { href: "/app-cards", label: "App cards", icon: BookText },
+  { href: "/db", label: "DB", icon: Database },
   { href: "/settings", label: "Settings", icon: Settings },
 ]
 

@@ -5,6 +5,12 @@ const envSchema = z.object({
   MONGODB_DB: z.string().min(1).optional(),
   EXECUTOR_URL: z.url().default("http://127.0.0.1:8765"),
   EXECUTOR_TOKEN: z.string().min(1, "EXECUTOR_TOKEN is required"),
+  /** When set, every request under /api/db must carry it as a bearer token. */
+  DB_API_TOKEN: z
+    .string()
+    .trim()
+    .optional()
+    .transform((v) => (v ? v : undefined)),
 })
 
 export type Env = z.infer<typeof envSchema>

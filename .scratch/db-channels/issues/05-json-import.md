@@ -4,7 +4,7 @@
 
 **Blocked by:** 04 Browse a channel's records
 
-**Status:** ready-for-agent
+**Status:** done
 
 - [ ] Import panel on the channel page with file input (`.json`) and textarea feeding one shared parse step; parse and key filtering happen client-side
 - [ ] Key checklist with per-key occurrence counts, all checked by default; only checked keys are sent

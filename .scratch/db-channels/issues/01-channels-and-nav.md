@@ -4,7 +4,7 @@
 
 **Blocked by:** None (can start immediately)
 
-**Status:** ready-for-agent
+**Status:** done
 
 - [ ] `DbChannel` model (unique slug `name`, optional `description`, timestamps) and `DbRecord` model (`channel`, closed-enum `status` defaulting to `pending`, `data`, optional `result`, optional `claimedAt`, timestamps) with the compound `{ channel, status, _id }` index
 - [ ] Operator API under `/api/db`: list channels, create channel, update description, delete channel with record cascade; zod validation in the service; existing `route()` envelope and error codes

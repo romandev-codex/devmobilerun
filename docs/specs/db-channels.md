@@ -156,6 +156,24 @@ Also under `/api/db`, following the same envelope:
 - Bulk on a channel: reset all `processing` to `pending`; delete all records with a given status; clear channel.
 - Import reuses the worker `add` service function after the UI has already filtered keys client-side, so the server has a single insertion path.
 
+Implemented paths (the `channels` segment keeps them apart from a worker channel path, so `channels` is a reserved slug):
+
+| Operation | Method | Path | Body | Success |
+| --- | --- | --- | --- | --- |
+| List channels with counts | `GET` | `/api/db/channels` | none | `200 { channels: [...] }` |
+| Create channel | `POST` | `/api/db/channels` | `{ name, description? }` | `201 { channel }` |
+| Get channel with counts | `GET` | `/api/db/channels/{name}` | none | `200 { channel }` |
+| Update description | `PATCH` | `/api/db/channels/{name}` | `{ description }` | `200 { channel }` |
+| Delete channel and its records | `DELETE` | `/api/db/channels/{name}` | none | `200 { deletedRecords }` |
+| List records | `GET` | `/api/db/channels/{name}/records?status=&page=&pageSize=` | none | `200 { records, page, pageSize, total, totalPages }` (newest first; `pageSize` 1–200, default 50) |
+| Add / import records | `POST` | `/api/db/channels/{name}/records` | one object or an array, as worker `add` | `201 { records: [...] }` |
+| Get one record | `GET` | `/api/db/channels/{name}/records/{id}` | none | `200 { record }` |
+| Update a record | `PATCH` | `/api/db/channels/{name}/records/{id}` | `{ data?, status? }`, at least one | `200 { record }` |
+| Delete a record | `DELETE` | `/api/db/channels/{name}/records/{id}` | none | `200 { deleted: true }` |
+| Bulk operation | `POST` | `/api/db/channels/{name}/records/bulk` | `{ action: "reset_processing" }`, `{ action: "delete_by_status", status }` or `{ action: "clear" }` | `200 { affected }` |
+
+A channel in responses is `{ id, name, description, counts: { pending, processing, done, failed }, createdAt, updatedAt }`. Record ids are always scoped to the channel in the path: an id from another channel answers `404 not_found`. Setting a status to `pending` (via worker `set`, operator update or bulk reset) clears `claimedAt`; setting it to `processing` by hand stamps `claimedAt` if it was empty.
+
 ### Authentication
 
 - A new optional environment variable, `DB_API_TOKEN`, is added to the env schema.
