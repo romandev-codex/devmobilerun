@@ -1,7 +1,7 @@
 "use client"
 
 import { useRouter } from "next/navigation"
-import { useState } from "react"
+import { Fragment, useState } from "react"
 import { Plus, Trash2 } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
@@ -25,6 +25,7 @@ import { Switch } from "@/components/ui/switch"
 import { Textarea } from "@/components/ui/textarea"
 import { AGENT_LABELS, AGENTS, type AgentKind } from "@/lib/agents"
 import { apiJson } from "@/lib/client/api"
+import type { ChannelOption } from "@/lib/db-channels"
 import type { TaskView } from "@/lib/tasks"
 
 type StartKind = "none" | "url" | "instruction"
@@ -84,14 +85,13 @@ export function TaskForm({
   channels,
 }: {
   task?: TaskView
-  /** Slugs of every DB channel the task can be bound to. */
-  channels: string[]
+  /** Every DB channel the task can be bound to, with its next pending record. */
+  channels: ChannelOption[]
 }) {
   // A task bound to a channel that has since been deleted still shows its slug.
-  const channelOptions =
-    task?.channel && !channels.includes(task.channel)
-      ? [task.channel, ...channels]
-      : channels
+  const channelOptions = channels.map((c) => c.name)
+  if (task?.channel && !channelOptions.includes(task.channel))
+    channelOptions.unshift(task.channel)
   const router = useRouter()
   const [form, setForm] = useState<FormState>(() => fromTask(task))
   const [error, setError] = useState<string | null>(null)
@@ -302,6 +302,11 @@ export function TaskForm({
               fields are added to the run&apos;s variables and appended to the
               goal. The record is marked done or failed from the run result.
             </p>
+            {form.channel ? (
+              <NextRecordPreview
+                option={channels.find((c) => c.name === form.channel) ?? null}
+              />
+            ) : null}
           </div>
         </CardContent>
       </Card>
@@ -310,7 +315,9 @@ export function TaskForm({
         <CardHeader>
           <CardTitle>Variables</CardTitle>
           <CardDescription>
-            Key/value pairs available to the prompts as variables.
+            Key/value pairs the goal, start and end text can use as{" "}
+            <code>{"{{key}}"}</code>. Record fields from the channel override a
+            variable with the same key.
           </CardDescription>
         </CardHeader>
         <CardContent className="grid gap-2">
@@ -380,5 +387,52 @@ export function TaskForm({
         ) : null}
       </div>
     </form>
+  )
+}
+
+/** The record the next run would claim, and how to reference its fields in the goal. */
+function NextRecordPreview({ option }: { option: ChannelOption | null }) {
+  if (!option)
+    return (
+      <p className="text-xs text-destructive">
+        This channel no longer exists; runs will fail until you pick another.
+      </p>
+    )
+  const record = option.nextRecord
+  if (!record)
+    return (
+      <p className="text-xs text-muted-foreground">
+        No pending records right now: a run of this task will be refused until
+        the channel is fed.
+      </p>
+    )
+  const keys = Object.keys(record.data)
+  const example = keys[0] ? `{{${keys[0]}}}` : "{{field}}"
+  return (
+    <div className="rounded-md border bg-muted/40 p-3 text-xs">
+      <div className="mb-1 font-medium">
+        Next record{" "}
+        <span className="font-mono text-muted-foreground">{record.id}</span>
+      </div>
+      <dl className="grid grid-cols-[max-content_1fr] gap-x-3 gap-y-0.5">
+        {keys.map((k) => (
+          <Fragment key={k}>
+            <dt className="font-mono text-muted-foreground">{`{{${k}}}`}</dt>
+            <dd className="truncate">
+              {typeof record.data[k] === "string"
+                ? (record.data[k] as string)
+                : JSON.stringify(record.data[k])}
+            </dd>
+          </Fragment>
+        ))}
+      </dl>
+      <p className="mt-2 text-muted-foreground">
+        Write the placeholders in the goal, start or end text and they are
+        replaced with the claimed record&apos;s values, for example:{" "}
+        <code>Open the profile of {example} and send a greeting</code>. All
+        fields are also appended to the goal, so the agent sees them even if the
+        goal does not mention them.
+      </p>
+    </div>
   )
 }

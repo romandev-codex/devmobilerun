@@ -315,6 +315,37 @@ export async function claimNextRecord(
   return doc ? toRecordView(doc) : null
 }
 
+/** The record the next `get` would hand out, without claiming it. */
+export async function peekNextRecord(
+  channel: string
+): Promise<RecordView | null> {
+  await connectDb()
+  const doc = await DbRecord.findOne({ channel, status: "pending" })
+    .sort({ _id: 1 })
+    .lean<DbRecordDoc>()
+  return doc ? toRecordView(doc) : null
+}
+
+export type ChannelOption = {
+  name: string
+  /** The record the next run of a task bound to this channel would claim. */
+  nextRecord: { id: string; data: Record<string, unknown> } | null
+}
+
+/** Every channel with its next pending record, for the task form's channel picker. */
+export async function listChannelOptions(): Promise<ChannelOption[]> {
+  const channels = await listChannels()
+  return Promise.all(
+    channels.map(async (c) => {
+      const next = await peekNextRecord(c.name)
+      return {
+        name: c.name,
+        nextRecord: next ? { id: next.id, data: next.data } : null,
+      }
+    })
+  )
+}
+
 /** Cheap check used by the queue dispatcher before it commits a device to a channel task. */
 export async function hasPendingRecord(channel: string): Promise<boolean> {
   await connectDb()

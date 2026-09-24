@@ -16,6 +16,7 @@ import { RunEvent, type RunEventDoc } from "@/lib/models/run-event"
 import { publishRunMessage } from "@/lib/runs/bus"
 import { settleChannelRecord } from "@/lib/runs/channel"
 import {
+  applyVariables,
   composeInstruction,
   recordInstructionBlock,
   recordVariables,
@@ -152,10 +153,21 @@ export async function createRun(input: {
   const record = task.channel ? await claimNextRecord(task.channel) : null
   if (task.channel && !record)
     throw conflict(`Channel ${task.channel} has no pending records`)
-  if (record) {
+  if (record)
     fields.variables = { ...fields.variables, ...recordVariables(record.data) }
+  // `{{key}}` in the task text resolves against task variables and, for a
+  // channel run, the record's fields. The record block is still appended so
+  // the agent sees every field, not only the ones the goal mentions.
+  fields.instruction = applyVariables(fields.instruction, fields.variables)
+  if (fields.startUrl)
+    fields.startUrl = applyVariables(fields.startUrl, fields.variables)
+  if (fields.endInstruction)
+    fields.endInstruction = applyVariables(
+      fields.endInstruction,
+      fields.variables
+    )
+  if (record)
     fields.instruction = `${fields.instruction}\n\n${recordInstructionBlock(record)}`
-  }
   try {
     const doc = await Run.create({
       ...fields,

@@ -224,7 +224,8 @@ A Task may be bound to a channel. Every run of such a task consumes exactly one 
 When a run of a channel-bound task is created (run now, an interval tick, or queue dispatch), after the usual device checks pass the app claims the next pending record with the same atomic operation the worker `get` uses. The run is then built from the record:
 
 - `variables` = the task's variables merged with the record's `data`, record keys winning. Every value is a string: strings are kept as they are, anything else is JSON-stringified.
-- The instruction gets a block appended after the goal, because the executor only exposes variables to prompt templates and never substitutes them into the goal text:
+- Every `{{key}}` in the goal, start (URL or instruction) and end text is replaced with the matching variable, record fields included. Unknown keys are left as written so a typo stays visible. This applies to every run, not only channel runs.
+- The instruction also gets a block appended after the goal, so the agent sees every field even when the goal does not mention it (the executor only exposes variables to prompt templates and never substitutes them itself):
 
   ```
   Record to process (channel "<slug>", record <id>):

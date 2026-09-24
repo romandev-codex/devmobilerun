@@ -59,3 +59,19 @@ export function recordInstructionBlock(record: {
     ...lines,
   ].join("\n")
 }
+
+/**
+ * Replaces every `{{key}}` in the text with the variable's value. Unknown keys
+ * are left as written so a typo stays visible in the run's instruction instead
+ * of vanishing. Whitespace inside the braces is allowed.
+ */
+export function applyVariables(
+  text: string,
+  variables: Record<string, string>
+): string {
+  return text.replace(/\{\{\s*([A-Za-z_][\w.-]*)\s*\}\}/g, (match, key) =>
+    Object.prototype.hasOwnProperty.call(variables, key)
+      ? variables[key]
+      : match
+  )
+}

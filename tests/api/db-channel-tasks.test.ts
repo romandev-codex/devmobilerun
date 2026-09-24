@@ -335,6 +335,40 @@ describe("channel-bound tasks", () => {
     expect((await getNext("stop"))!.id).toBe(id)
   })
 
+  it("substitutes {{key}} in the goal, start URL and end text from task variables and the record", async () => {
+    await createChannel("subst")
+    await addRecords("subst", [{ handle: "ada", url: "https://x.test/ada" }])
+    const task = (
+      await createTask({
+        channel: "subst",
+        start: { type: "url", value: "https://x.test/{{ handle }}" },
+        goal: "Greet {{handle}} from the {{account}} account; {{missing}} stays",
+        end: "Log out of {{account}}",
+        variables: [
+          { key: "account", value: "work" },
+          { key: "handle", value: "overridden-by-record" },
+        ],
+      })
+    ).body.task
+    const { status, body } = await runNow(task.id)
+    expect(status).toBe(201)
+    expect(body.run.startUrl).toBe("https://x.test/ada")
+    expect(body.run.endInstruction).toBe("Log out of work")
+    expect(body.run.instruction.split("\n\n")[0]).toBe(
+      "Greet ada from the work account; {{missing}} stays"
+    )
+    expect(body.run.variables.handle).toBe("ada")
+  })
+
+  it("lists channel options with the record the next run would claim, without claiming it", async () => {
+    await createChannel("peek")
+    const [first] = await addRecords("peek", [{ a: 1 }, { a: 2 }])
+    const { listChannelOptions } = await import("@/lib/db-channels")
+    const option = (await listChannelOptions()).find((c) => c.name === "peek")
+    expect(option?.nextRecord).toEqual({ id: first, data: { a: 1 } })
+    expect((await record("peek", first)).status).toBe("pending")
+  })
+
   it("does not overwrite a record an operator settled by hand while the run was running", async () => {
     await createChannel("manual")
     const [id] = await addRecords("manual", { n: 1 })
