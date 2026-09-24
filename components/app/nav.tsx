@@ -17,10 +17,10 @@ import { cn } from "@/lib/utils"
 const items = [
   { href: "/devices", label: "Devices", icon: Smartphone },
   { href: "/tasks", label: "Tasks", icon: ListChecks },
+  { href: "/db", label: "Database", icon: Database },
   { href: "/schedules", label: "Schedules", icon: CalendarClock },
   { href: "/runs", label: "Runs", icon: Play },
   { href: "/app-cards", label: "App cards", icon: BookText },
-  { href: "/db", label: "DB", icon: Database },
   { href: "/settings", label: "Settings", icon: Settings },
 ]
 
