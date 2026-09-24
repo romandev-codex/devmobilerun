@@ -4,6 +4,8 @@ import { z } from "zod"
 import { AGENTS, type TaskOptions, toTaskOptions } from "@/lib/agents"
 import { notFound } from "@/lib/api/errors"
 import { asObjectId as toObjectId, connectDb } from "@/lib/db"
+import { ensureChannel } from "@/lib/db-channels"
+import { DB_CHANNEL_NAME_RE } from "@/lib/models/db-channel"
 import { Run } from "@/lib/models/run"
 import { Schedule } from "@/lib/models/schedule"
 import { Task, type TaskDoc } from "@/lib/models/task"
@@ -54,6 +56,12 @@ export const taskVariablesSchema = z
     }
   })
 
+/** Slug of the DB channel whose records the task's runs consume. */
+const taskChannelSchema = z
+  .string()
+  .trim()
+  .regex(DB_CHANNEL_NAME_RE, "Channel must be a channel slug")
+
 export const createTaskSchema = z.object({
   name: z.string().trim().min(1, "Name is required").max(120),
   start: taskStartSchema.nullable().default(null),
@@ -71,6 +79,7 @@ export const createTaskSchema = z.object({
     maxSteps: 15,
   }),
   variables: taskVariablesSchema.default([]),
+  channel: taskChannelSchema.nullable().default(null),
 })
 
 /** Option fields without defaults, so a patch only touches what it names. */
@@ -96,6 +105,7 @@ export const updateTaskSchema = z
       .nullable(),
     options: taskOptionsPatchSchema,
     variables: taskVariablesSchema,
+    channel: taskChannelSchema.nullable(),
   })
   .partial()
   .refine((v) => Object.keys(v).length > 0, { message: "No fields provided" })
@@ -110,6 +120,8 @@ export type TaskView = {
   end: string | null
   options: TaskOptions
   variables: { key: string; value: string }[]
+  /** Slug of the DB channel each run claims a record from, or null. */
+  channel: string | null
   createdAt: string
   updatedAt: string
 }
@@ -128,6 +140,7 @@ export function toTaskView(doc: TaskDoc): TaskView {
     end: doc.end ?? null,
     options: toTaskOptions(doc.options),
     variables: doc.variables.map((v) => ({ key: v.key, value: v.value })),
+    channel: doc.channel ?? null,
     createdAt: doc.createdAt.toISOString(),
     updatedAt: doc.updatedAt.toISOString(),
   }
@@ -204,6 +217,7 @@ export async function getTask(id: string): Promise<TaskSummary> {
 export async function createTask(input: unknown): Promise<TaskView> {
   const data = createTaskSchema.parse(input)
   await connectDb()
+  if (data.channel) await ensureChannel(data.channel)
   const doc = await Task.create(data)
   return toTaskView(doc.toObject() as TaskDoc)
 }
@@ -214,6 +228,7 @@ export async function updateTask(
 ): Promise<TaskView> {
   const { options, ...rest } = updateTaskSchema.parse(input)
   await connectDb()
+  if (rest.channel) await ensureChannel(rest.channel)
   // Option fields are set individually so a partial options object keeps the untouched ones.
   const $set: Record<string, unknown> = { ...rest }
   for (const [k, v] of Object.entries(options ?? {})) $set[`options.${k}`] = v
@@ -245,6 +260,7 @@ export async function duplicateTask(id: string): Promise<TaskView> {
     end: source.end,
     options: source.options,
     variables: source.variables,
+    channel: source.channel ?? null,
   })
   return toTaskView(doc.toObject() as TaskDoc)
 }

@@ -41,6 +41,8 @@ const taskSchema = new Schema(
     end: { type: String, default: null },
     options: { type: optionsSchema, required: true, default: () => ({}) },
     variables: { type: [variableSchema], required: true, default: [] },
+    /** Slug of a DB channel; every run of the task consumes one of its records. */
+    channel: { type: String, default: null },
   },
   { timestamps: true }
 )

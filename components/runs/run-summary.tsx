@@ -113,6 +113,21 @@ export function RunMeta({
           <dd className="truncate font-mono text-xs">{run.startUrl}</dd>
         </>
       ) : null}
+      {run.dbRecord ? (
+        <>
+          <dt className="text-muted-foreground">Record</dt>
+          <dd className="text-xs">
+            <Link
+              href={`/db/${run.dbRecord.channel}`}
+              className="hover:underline"
+            >
+              Record <span className="font-mono">{run.dbRecord.recordId}</span>{" "}
+              from channel{" "}
+              <span className="font-mono">{run.dbRecord.channel}</span>
+            </Link>
+          </dd>
+        </>
+      ) : null}
     </dl>
   )
 }

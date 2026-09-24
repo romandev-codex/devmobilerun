@@ -8,6 +8,7 @@ import { TaskForm } from "@/components/tasks/task-form"
 import { TaskMemoryForm } from "@/components/tasks/task-memory-form"
 import { Button } from "@/components/ui/button"
 import { ApiError } from "@/lib/api/errors"
+import { listChannels } from "@/lib/db-channels"
 import { deviceLabel, listDevices } from "@/lib/devices"
 import { listRuns } from "@/lib/runs/service"
 import { getTaskMemory } from "@/lib/task-memory"
@@ -61,7 +62,10 @@ export default async function TaskPage({
         ))}
       </div>
       {tab === "edit" ? (
-        <TaskForm task={task} />
+        <TaskForm
+          task={task}
+          channels={(await listChannels()).map((c) => c.name)}
+        />
       ) : tab === "memory" ? (
         <TaskMemoryForm memory={await getTaskMemory(task.id)} />
       ) : (

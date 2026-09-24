@@ -2,6 +2,7 @@ import Link from "next/link"
 
 import { RunStatusBadge } from "@/components/runs/run-status-badge"
 import { TaskActions } from "@/components/tasks/task-actions"
+import { Badge } from "@/components/ui/badge"
 import {
   Table,
   TableBody,
@@ -28,12 +29,23 @@ export function TaskTable({ tasks }: { tasks: TaskSummary[] }) {
         {tasks.map((t) => (
           <TableRow key={t.id}>
             <TableCell>
-              <Link
-                href={`/tasks/${t.id}`}
-                className="font-medium hover:underline"
-              >
-                {t.name}
-              </Link>
+              <div className="flex items-center gap-2">
+                <Link
+                  href={`/tasks/${t.id}`}
+                  className="font-medium hover:underline"
+                >
+                  {t.name}
+                </Link>
+                {t.channel ? (
+                  <Badge
+                    variant="outline"
+                    className="font-mono"
+                    render={<Link href={`/db/${t.channel}`} />}
+                  >
+                    {t.channel}
+                  </Badge>
+                ) : null}
+              </div>
               <p className="max-w-md truncate text-xs text-muted-foreground">
                 {t.goal}
               </p>

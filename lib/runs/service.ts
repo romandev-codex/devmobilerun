@@ -4,6 +4,7 @@ import { z } from "zod"
 import { type TaskOptions, toTaskOptions } from "@/lib/agents"
 import { conflict, notFound } from "@/lib/api/errors"
 import { asObjectId as toObjectId, connectDb } from "@/lib/db"
+import { claimNextRecord, undoRecord } from "@/lib/db-channels"
 import { Device } from "@/lib/models/device"
 import {
   Run,
@@ -13,7 +14,12 @@ import {
 } from "@/lib/models/run"
 import { RunEvent, type RunEventDoc } from "@/lib/models/run-event"
 import { publishRunMessage } from "@/lib/runs/bus"
-import { composeInstruction } from "@/lib/runs/compose"
+import { settleChannelRecord } from "@/lib/runs/channel"
+import {
+  composeInstruction,
+  recordInstructionBlock,
+  recordVariables,
+} from "@/lib/runs/compose"
 import { getTask, type TaskSummary } from "@/lib/tasks"
 
 export type RunView = {
@@ -36,6 +42,8 @@ export type RunView = {
   result: { success: boolean; reason: string; steps: number } | null
   error: string | null
   skipReason: string | null
+  /** The DB channel record this run claimed, or null for a task without a channel. */
+  dbRecord: { channel: string; recordId: string } | null
   createdAt: string
 }
 
@@ -73,6 +81,12 @@ export function toRunView(doc: RunDoc): RunView {
       : null,
     error: doc.error ?? null,
     skipReason: doc.skipReason ?? null,
+    dbRecord: doc.dbRecord
+      ? {
+          channel: doc.dbRecord.channel,
+          recordId: doc.dbRecord.recordId.toString(),
+        }
+      : null,
     createdAt: doc.createdAt.toISOString(),
   }
 }
@@ -132,12 +146,34 @@ export async function createRun(input: {
   if (device.activeRunId)
     throw conflict(`Device ${input.deviceSerial} is busy with another run`)
 
-  const doc = await Run.create({
-    ...runFields(task, input.deviceSerial, input.scheduleId ?? null),
-    status: "queued",
-    trigger: input.trigger,
-  })
-  return toRunView(doc.toObject() as RunDoc)
+  const fields = runFields(task, input.deviceSerial, input.scheduleId ?? null)
+  // A channel-bound task consumes exactly one record per run: claim it now so
+  // the run carries the record's fields, and give it back if the run is never written.
+  const record = task.channel ? await claimNextRecord(task.channel) : null
+  if (task.channel && !record)
+    throw conflict(`Channel ${task.channel} has no pending records`)
+  if (record) {
+    fields.variables = { ...fields.variables, ...recordVariables(record.data) }
+    fields.instruction = `${fields.instruction}\n\n${recordInstructionBlock(record)}`
+  }
+  try {
+    const doc = await Run.create({
+      ...fields,
+      status: "queued",
+      trigger: input.trigger,
+      dbRecord: record
+        ? {
+            channel: record.channel,
+            recordId: new mongoose.Types.ObjectId(record.id),
+          }
+        : null,
+    })
+    return toRunView(doc.toObject() as RunDoc)
+  } catch (err) {
+    if (record)
+      await undoRecord(record.channel, record.id).catch(() => undefined)
+    throw err
+  }
 }
 
 /** Records a scheduled tick that could not start. */
@@ -227,7 +263,11 @@ export async function finishRun(
     { _id: runId, status: { $in: ["queued", "running"] } },
     { $set }
   )
-  if (res.matchedCount === 1) await notifyRunStatus(runId)
+  if (res.matchedCount === 1) {
+    // The run just became terminal: the record it claimed, if any, follows.
+    await settleChannelRecord(runId)
+    await notifyRunStatus(runId)
+  }
   return res.matchedCount === 1
 }
 
@@ -248,7 +288,12 @@ export async function transitionRun(
   $set: Record<string, unknown>
 ): Promise<boolean> {
   const res = await Run.updateOne({ _id: runId, status: from }, { $set })
-  if (res.matchedCount === 1) await notifyRunStatus(runId)
+  if (res.matchedCount === 1) {
+    // Bypasses finishRun (e.g. stopRun cancelling a queued run), so the
+    // claimed record is settled here when the transition is a terminal one.
+    if (isTerminal(String($set.status ?? ""))) await settleChannelRecord(runId)
+    await notifyRunStatus(runId)
+  }
   return res.matchedCount === 1
 }
 

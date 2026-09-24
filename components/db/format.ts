@@ -9,6 +9,14 @@ export function formatDuration(ms: number): string {
   return `${Math.floor(h / 24)}d ${h % 24}h`
 }
 
+/** The run id a channel-bound run wrote into a record's result, when it looks like one. */
+export function resultRunId(
+  result: Record<string, unknown> | null
+): string | null {
+  const id = result?.runId
+  return typeof id === "string" && /^[a-f0-9]{24}$/.test(id) ? id : null
+}
+
 /** One-line preview of a record's data for table cells. */
 export function previewJson(value: unknown, max = 100): string {
   const text = JSON.stringify(value) ?? ""

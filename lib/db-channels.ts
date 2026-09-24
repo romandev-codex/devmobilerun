@@ -209,7 +209,8 @@ export async function getChannel(name: string): Promise<ChannelView> {
 }
 
 /** Throws the channel 404 unless the slug exists. */
-async function ensureChannel(name: string): Promise<void> {
+export async function ensureChannel(name: string): Promise<void> {
+  await connectDb()
   const exists = await DbChannel.exists({ name })
   if (!exists) throw notFound("Channel")
 }
@@ -312,6 +313,40 @@ export async function claimNextRecord(
     { sort: { _id: 1 }, new: true }
   ).lean<DbRecordDoc>()
   return doc ? toRecordView(doc) : null
+}
+
+/** Cheap check used by the queue dispatcher before it commits a device to a channel task. */
+export async function hasPendingRecord(channel: string): Promise<boolean> {
+  await connectDb()
+  const found = await DbRecord.exists({ channel, status: "pending" })
+  return found !== null
+}
+
+export type SettleRecordOutcome =
+  | { status: "done" | "failed"; result: Record<string, unknown> }
+  | { status: "pending" }
+
+/**
+ * Settles a record a run claimed: done or failed with a result, or back to
+ * pending at its original queue position. Applies only while the record is
+ * still `processing`, so a record an operator has already changed by hand is
+ * left alone. Returns whether the record was changed.
+ */
+export async function settleRecord(
+  channel: string,
+  id: string,
+  outcome: SettleRecordOutcome
+): Promise<boolean> {
+  await connectDb()
+  const $set: Record<string, unknown> =
+    outcome.status === "pending"
+      ? { status: "pending", claimedAt: null }
+      : { status: outcome.status, result: outcome.result }
+  const res = await DbRecord.updateOne(
+    { _id: toObjectId(id, "Record"), channel, status: "processing" },
+    { $set }
+  )
+  return res.matchedCount === 1
 }
 
 /** Finds a record inside its channel, or throws the record 404. */

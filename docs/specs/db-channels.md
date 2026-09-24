@@ -94,22 +94,22 @@ Two collections.
 
 **DbChannel**
 
-| Field | Type | Meaning |
-| --- | --- | --- |
-| `name` | string, unique, `^[a-z0-9][a-z0-9_-]{0,63}$` | Slug used in API paths and UI URLs. Immutable after creation. |
-| `description` | string, optional | Free text for operators. |
-| `createdAt` / `updatedAt` | dates | Standard timestamps. |
+| Field                     | Type                                         | Meaning                                                       |
+| ------------------------- | -------------------------------------------- | ------------------------------------------------------------- |
+| `name`                    | string, unique, `^[a-z0-9][a-z0-9_-]{0,63}$` | Slug used in API paths and UI URLs. Immutable after creation. |
+| `description`             | string, optional                             | Free text for operators.                                      |
+| `createdAt` / `updatedAt` | dates                                        | Standard timestamps.                                          |
 
 **DbRecord**
 
-| Field | Type | Meaning |
-| --- | --- | --- |
-| `channel` | string | Slug of the owning channel. Denormalised so worker calls need no join. |
-| `status` | `"pending" \| "processing" \| "done" \| "failed"` | Lifecycle state. Defaults to `pending`. |
-| `data` | object | The operator's or worker's JSON object, stored verbatim under this key. |
-| `result` | object, optional | Free-form output written by a worker via set. |
-| `claimedAt` | date, optional | Set when get hands the record out; cleared by undo. |
-| `createdAt` / `updatedAt` | dates | Standard timestamps. |
+| Field                     | Type                                              | Meaning                                                                 |
+| ------------------------- | ------------------------------------------------- | ----------------------------------------------------------------------- |
+| `channel`                 | string                                            | Slug of the owning channel. Denormalised so worker calls need no join.  |
+| `status`                  | `"pending" \| "processing" \| "done" \| "failed"` | Lifecycle state. Defaults to `pending`.                                 |
+| `data`                    | object                                            | The operator's or worker's JSON object, stored verbatim under this key. |
+| `result`                  | object, optional                                  | Free-form output written by a worker via set.                           |
+| `claimedAt`               | date, optional                                    | Set when get hands the record out; cleared by undo.                     |
+| `createdAt` / `updatedAt` | dates                                             | Standard timestamps.                                                    |
 
 Indexes: `{ channel, status, _id }` on records (serves get, filters and counts); unique `{ name }` on channels.
 
@@ -134,12 +134,12 @@ pending ──get──▶ processing ──set(done)───▶ done
 
 All paths are prefixed by `/api/db/{channel}` where `{channel}` is the slug. Responses use the app's existing envelope conventions: a named key on success, `{ error: { code, message } }` on failure.
 
-| Operation | Method(s) | Body | Success |
-| --- | --- | --- | --- |
-| get next | `GET` or `POST` `/get` | none | `200 { record }` where `record` is the claimed record or `null` |
-| add | `POST` `/add` | one object, or an array of objects | `201 { records: [...] }` |
-| set | `PATCH` or `POST` `/set/{id}` | `{ status?, result? }`, at least one key | `200 { record }` |
-| undo | `POST` `/undo/{id}` | none | `200 { record }` |
+| Operation | Method(s)                     | Body                                     | Success                                                         |
+| --------- | ----------------------------- | ---------------------------------------- | --------------------------------------------------------------- |
+| get next  | `GET` or `POST` `/get`        | none                                     | `200 { record }` where `record` is the claimed record or `null` |
+| add       | `POST` `/add`                 | one object, or an array of objects       | `201 { records: [...] }`                                        |
+| set       | `PATCH` or `POST` `/set/{id}` | `{ status?, result? }`, at least one key | `200 { record }`                                                |
+| undo      | `POST` `/undo/{id}`           | none                                     | `200 { record }`                                                |
 
 A record in responses is `{ id, channel, status, data, result, claimedAt, createdAt, updatedAt }`.
 
@@ -158,19 +158,19 @@ Also under `/api/db`, following the same envelope:
 
 Implemented paths (the `channels` segment keeps them apart from a worker channel path, so `channels` is a reserved slug):
 
-| Operation | Method | Path | Body | Success |
-| --- | --- | --- | --- | --- |
-| List channels with counts | `GET` | `/api/db/channels` | none | `200 { channels: [...] }` |
-| Create channel | `POST` | `/api/db/channels` | `{ name, description? }` | `201 { channel }` |
-| Get channel with counts | `GET` | `/api/db/channels/{name}` | none | `200 { channel }` |
-| Update description | `PATCH` | `/api/db/channels/{name}` | `{ description }` | `200 { channel }` |
-| Delete channel and its records | `DELETE` | `/api/db/channels/{name}` | none | `200 { deletedRecords }` |
-| List records | `GET` | `/api/db/channels/{name}/records?status=&page=&pageSize=` | none | `200 { records, page, pageSize, total, totalPages }` (newest first; `pageSize` 1–200, default 50) |
-| Add / import records | `POST` | `/api/db/channels/{name}/records` | one object or an array, as worker `add` | `201 { records: [...] }` |
-| Get one record | `GET` | `/api/db/channels/{name}/records/{id}` | none | `200 { record }` |
-| Update a record | `PATCH` | `/api/db/channels/{name}/records/{id}` | `{ data?, status? }`, at least one | `200 { record }` |
-| Delete a record | `DELETE` | `/api/db/channels/{name}/records/{id}` | none | `200 { deleted: true }` |
-| Bulk operation | `POST` | `/api/db/channels/{name}/records/bulk` | `{ action: "reset_processing" }`, `{ action: "delete_by_status", status }` or `{ action: "clear" }` | `200 { affected }` |
+| Operation                      | Method   | Path                                                      | Body                                                                                                | Success                                                                                           |
+| ------------------------------ | -------- | --------------------------------------------------------- | --------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------- |
+| List channels with counts      | `GET`    | `/api/db/channels`                                        | none                                                                                                | `200 { channels: [...] }`                                                                         |
+| Create channel                 | `POST`   | `/api/db/channels`                                        | `{ name, description? }`                                                                            | `201 { channel }`                                                                                 |
+| Get channel with counts        | `GET`    | `/api/db/channels/{name}`                                 | none                                                                                                | `200 { channel }`                                                                                 |
+| Update description             | `PATCH`  | `/api/db/channels/{name}`                                 | `{ description }`                                                                                   | `200 { channel }`                                                                                 |
+| Delete channel and its records | `DELETE` | `/api/db/channels/{name}`                                 | none                                                                                                | `200 { deletedRecords }`                                                                          |
+| List records                   | `GET`    | `/api/db/channels/{name}/records?status=&page=&pageSize=` | none                                                                                                | `200 { records, page, pageSize, total, totalPages }` (newest first; `pageSize` 1–200, default 50) |
+| Add / import records           | `POST`   | `/api/db/channels/{name}/records`                         | one object or an array, as worker `add`                                                             | `201 { records: [...] }`                                                                          |
+| Get one record                 | `GET`    | `/api/db/channels/{name}/records/{id}`                    | none                                                                                                | `200 { record }`                                                                                  |
+| Update a record                | `PATCH`  | `/api/db/channels/{name}/records/{id}`                    | `{ data?, status? }`, at least one                                                                  | `200 { record }`                                                                                  |
+| Delete a record                | `DELETE` | `/api/db/channels/{name}/records/{id}`                    | none                                                                                                | `200 { deleted: true }`                                                                           |
+| Bulk operation                 | `POST`   | `/api/db/channels/{name}/records/bulk`                    | `{ action: "reset_processing" }`, `{ action: "delete_by_status", status }` or `{ action: "clear" }` | `200 { affected }`                                                                                |
 
 A channel in responses is `{ id, name, description, counts: { pending, processing, done, failed }, createdAt, updatedAt }`. Record ids are always scoped to the channel in the path: an id from another channel answers `404 not_found`. Setting a status to `pending` (via worker `set`, operator update or bulk reset) clears `claimedAt`; setting it to `processing` by hand stamps `claimedAt` if it was empty.
 
@@ -210,6 +210,49 @@ A channel in responses is `{ id, name, description, counts: { pending, processin
 9. Bulk reset and delete-by-status affect only the targeted status.
 10. With `DB_API_TOKEN` set, a request without the header gets `401` and one with the correct bearer succeeds; with it unset, requests succeed without a header.
 
+## Channel-bound tasks
+
+A Task may be bound to a channel. Every run of such a task consumes exactly one record: the run claims it when it is created, hands it to the agent, and settles it from the run's final status. The Python executor is untouched; the app does all of this around the run.
+
+### Data model
+
+- **Task** gains `channel`: the slug of a channel, or `null` (the default). It is validated with the slug rule and, when set, must name an existing channel on create and update (`404 not_found` "Channel" otherwise). The task list, task view and task form show it; the form offers a select with "None" plus every channel.
+- **Run** gains `dbRecord`: `{ channel, recordId }` or `null`. The run view exposes both as strings so the run page can link to the channel.
+
+### Claim
+
+When a run of a channel-bound task is created (run now, an interval tick, or queue dispatch), after the usual device checks pass the app claims the next pending record with the same atomic operation the worker `get` uses. The run is then built from the record:
+
+- `variables` = the task's variables merged with the record's `data`, record keys winning. Every value is a string: strings are kept as they are, anything else is JSON-stringified.
+- The instruction gets a block appended after the goal, because the executor only exposes variables to prompt templates and never substitutes them into the goal text:
+
+  ```
+  Record to process (channel "<slug>", record <id>):
+  - <key>: <value>
+  - ...
+  ```
+
+- `dbRecord` points at the claimed record, whose status is now `processing` with `claimedAt` stamped.
+
+If the channel has no pending record the run is refused with `409 conflict` ("Channel `<slug>` has no pending records") and nothing is written; if the channel no longer exists the `404` propagates. If writing the run fails after the claim, the claim is undone so no record is stranded. A skipped run (recorded when a tick could not start) never claims anything.
+
+### Settle
+
+Every path that gives a run a terminal status settles its record, and only while the record is still `processing`: a record an operator has already changed by hand is never overwritten. Settling is idempotent and never fails the run.
+
+| Run ends as                    | Record becomes                                                  | Record `result`                                                                                  |
+| ------------------------------ | --------------------------------------------------------------- | ------------------------------------------------------------------------------------------------ |
+| `succeeded`                    | `done`                                                          | `{ runId, success: true, reason, steps }`                                                        |
+| `failed`                       | `failed`                                                        | `{ runId, success: false, reason, steps }` where `reason` is the agent's reason or the run error |
+| `cancelled`, `lost`, `skipped` | `pending` (undo: keeps its queue position, `claimedAt` cleared) | unchanged                                                                                        |
+
+The records table and record dialog link `result.runId` to the run page; the run page links a run's record back to its channel.
+
+### Schedules
+
+- **Interval tick**: when the channel is empty the tick records a skipped run with the reason "Channel `<slug>` has no pending records" and plans the next tick as usual, so the schedule keeps polling the channel.
+- **Queue dispatch**: a queue schedule whose task is bound to a channel with nothing pending is passed over for that cycle and the next runnable schedule on the device is tried, so an empty channel never blocks the device's rotation. Its turn comes back as soon as the channel is fed.
+
 ## Out of Scope
 
 - **Lease timeouts / auto-undo** of stale `processing` records. Operators reset them by hand or workers undo them. A per-channel visibility timeout can be added later without changing the API.
@@ -221,7 +264,7 @@ A channel in responses is `{ id, name, description, counts: { pending, processin
 - **Retention or automatic purge** of done records.
 - **Editing a channel's slug** after creation.
 - **Long-polling or SSE** for workers waiting on an empty channel; workers poll.
-- Any integration with the existing Task / Run / Schedule pipeline. This module is a standalone store that external workers happen to use.
+- Any integration with the Task / Run / Schedule pipeline beyond channel-bound tasks (see above): no per-record retry policies, no fan-out of one record to several runs, no writing records from a run's events.
 
 ## Further Notes
 

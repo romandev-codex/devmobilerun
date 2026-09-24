@@ -1,10 +1,15 @@
 "use client"
 
+import Link from "next/link"
 import { useRouter } from "next/navigation"
 import { useState } from "react"
 
 import { useDbApi } from "@/components/db/db-api-provider"
-import { formatDuration, parseJsonObject } from "@/components/db/format"
+import {
+  formatDuration,
+  parseJsonObject,
+  resultRunId,
+} from "@/components/db/format"
 import { DbStatusBadge } from "@/components/db/status-badge"
 import { StatusSelect } from "@/components/db/status-select"
 import { Button } from "@/components/ui/button"
@@ -110,7 +115,20 @@ export function RecordDialog({
             />
           </div>
           <div className="grid gap-1.5">
-            <Label>Result</Label>
+            <div className="flex items-center justify-between">
+              <Label>Result</Label>
+              {resultRunId(record.result) ? (
+                <Link
+                  href={`/runs/${resultRunId(record.result)}`}
+                  className="text-xs text-muted-foreground hover:underline"
+                >
+                  Run{" "}
+                  <span className="font-mono">
+                    {resultRunId(record.result)}
+                  </span>
+                </Link>
+              ) : null}
+            </div>
             <pre className="max-h-48 overflow-auto border border-input bg-muted/40 px-2.5 py-2 font-mono text-xs">
               {record.result === null ? (
                 <span className="text-muted-foreground">No result yet.</span>

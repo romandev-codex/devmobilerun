@@ -63,6 +63,17 @@ const runSchema = new Schema(
     },
     error: { type: String, default: null },
     skipReason: { type: String, default: null },
+    /** The DB channel record this run claimed, settled from the run's final status. */
+    dbRecord: {
+      type: new Schema(
+        {
+          channel: { type: String, required: true },
+          recordId: { type: Schema.Types.ObjectId, required: true },
+        },
+        { _id: false }
+      ),
+      default: null,
+    },
   },
   { timestamps: true }
 )

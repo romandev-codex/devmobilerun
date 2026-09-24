@@ -3,6 +3,7 @@ import { z } from "zod"
 
 import { notFound } from "@/lib/api/errors"
 import { asObjectId as toObjectId, connectDb } from "@/lib/db"
+import { hasPendingRecord } from "@/lib/db-channels"
 import { deviceCooldownUntil } from "@/lib/device-thermal"
 import { syncDevices } from "@/lib/devices"
 import { Device } from "@/lib/models/device"
@@ -435,14 +436,9 @@ export async function dispatchDevice(serial: string): Promise<boolean> {
   })
     .sort({ lastRunAt: 1, order: 1 })
     .lean<ScheduleDoc[]>()
-  const next = queued.find(isRunnable)
+  const next = await nextDispatchable(queued)
   if (!next) return false
 
-  const task = await Task.findById(next.taskId).select("_id").lean()
-  if (!task) {
-    await disableSchedule(next._id)
-    return false
-  }
   try {
     const run = await createRun({
       taskId: next.taskId.toString(),
@@ -458,6 +454,30 @@ export async function dispatchDevice(serial: string): Promise<boolean> {
     console.error(`[dispatch] ${serial} could not start a queued schedule`, err)
     return false
   }
+}
+
+/**
+ * The first runnable schedule in rotation order whose task can start now. A
+ * schedule whose task is gone is retired; one whose task is bound to a channel
+ * with nothing pending is passed over so it does not block the device — its
+ * turn comes back as soon as the channel is fed.
+ */
+async function nextDispatchable(
+  candidates: ScheduleDoc[]
+): Promise<ScheduleDoc | null> {
+  for (const s of candidates) {
+    if (!isRunnable(s)) continue
+    const task = await Task.findById(s.taskId)
+      .select("_id channel")
+      .lean<{ channel?: string | null }>()
+    if (!task) {
+      await disableSchedule(s._id)
+      continue
+    }
+    if (task.channel && !(await hasPendingRecord(task.channel))) continue
+    return s
+  }
+  return null
 }
 
 /**
@@ -631,13 +651,11 @@ function ranOutOfSteps(run: {
 async function failStreakEffect(
   runId: mongoose.Types.ObjectId
 ): Promise<"extend" | "clear" | "keep"> {
-  const run = await Run.findById(runId)
-    .select("status result options")
-    .lean<{
-      status: string
-      result?: { success?: boolean; steps?: number } | null
-      options?: { maxSteps?: number } | null
-    }>()
+  const run = await Run.findById(runId).select("status result options").lean<{
+    status: string
+    result?: { success?: boolean; steps?: number } | null
+    options?: { maxSteps?: number } | null
+  }>()
   if (!run) return "keep"
   if (run.status === "succeeded") return "clear"
   if (run.status === "failed" && ranOutOfSteps(run)) return "keep"

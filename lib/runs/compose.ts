@@ -26,3 +26,36 @@ export function composeInstruction(
     endInstruction: end ? end : null,
   }
 }
+
+/** Run variables must be strings: strings pass through, everything else is JSON. */
+export function stringifyRecordValue(value: unknown): string {
+  return typeof value === "string" ? value : (JSON.stringify(value) ?? "null")
+}
+
+/** A record's fields as run variables, every value stringified. */
+export function recordVariables(
+  data: Record<string, unknown>
+): Record<string, string> {
+  return Object.fromEntries(
+    Object.entries(data).map(([k, v]) => [k, stringifyRecordValue(v)])
+  )
+}
+
+/**
+ * The block appended to the goal for a channel-bound run. The executor only
+ * exposes variables to custom prompt templates and never substitutes them into
+ * the goal text, so the record is spelled out in the instruction as well.
+ */
+export function recordInstructionBlock(record: {
+  channel: string
+  id: string
+  data: Record<string, unknown>
+}): string {
+  const lines = Object.entries(record.data).map(
+    ([k, v]) => `- ${k}: ${stringifyRecordValue(v)}`
+  )
+  return [
+    `Record to process (channel "${record.channel}", record ${record.id}):`,
+    ...lines,
+  ].join("\n")
+}

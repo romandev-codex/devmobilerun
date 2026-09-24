@@ -1,8 +1,9 @@
 "use client"
 
+import Link from "next/link"
 import { useState } from "react"
 
-import { previewJson } from "@/components/db/format"
+import { previewJson, resultRunId } from "@/components/db/format"
 import { RecordDialog } from "@/components/db/record-dialog"
 import { DbStatusBadge } from "@/components/db/status-badge"
 import {
@@ -35,6 +36,7 @@ export function RecordTable({
             <TableHead>Id</TableHead>
             <TableHead>Status</TableHead>
             <TableHead>Data</TableHead>
+            <TableHead>Run</TableHead>
             <TableHead>Created</TableHead>
             <TableHead>Claimed</TableHead>
           </TableRow>
@@ -52,6 +54,19 @@ export function RecordTable({
               </TableCell>
               <TableCell className="max-w-md truncate font-mono text-xs text-muted-foreground">
                 {previewJson(r.data)}
+              </TableCell>
+              <TableCell className="font-mono text-xs">
+                {resultRunId(r.result) ? (
+                  <Link
+                    href={`/runs/${resultRunId(r.result)}`}
+                    className="hover:underline"
+                    onClick={(e) => e.stopPropagation()}
+                  >
+                    {resultRunId(r.result)}
+                  </Link>
+                ) : (
+                  <span className="text-muted-foreground">—</span>
+                )}
               </TableCell>
               <TableCell className="text-xs whitespace-nowrap text-muted-foreground">
                 {new Date(r.createdAt).toLocaleString()}

@@ -14,6 +14,13 @@ import {
 } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select"
 import { Switch } from "@/components/ui/switch"
 import { Textarea } from "@/components/ui/textarea"
 import { AGENT_LABELS, AGENTS, type AgentKind } from "@/lib/agents"
@@ -33,6 +40,7 @@ type FormState = {
   reasoning: boolean
   maxSteps: string
   variables: { key: string; value: string }[]
+  channel: string | null
 }
 
 function fromTask(task?: TaskView): FormState {
@@ -47,6 +55,7 @@ function fromTask(task?: TaskView): FormState {
     reasoning: task?.options.reasoning ?? false,
     maxSteps: String(task?.options.maxSteps ?? 15),
     variables: task?.variables.map((v) => ({ ...v })) ?? [],
+    channel: task?.channel ?? null,
   }
 }
 
@@ -66,10 +75,23 @@ function toPayload(f: FormState) {
       maxSteps: Number(f.maxSteps),
     },
     variables: f.variables,
+    channel: f.channel,
   }
 }
 
-export function TaskForm({ task }: { task?: TaskView }) {
+export function TaskForm({
+  task,
+  channels,
+}: {
+  task?: TaskView
+  /** Slugs of every DB channel the task can be bound to. */
+  channels: string[]
+}) {
+  // A task bound to a channel that has since been deleted still shows its slug.
+  const channelOptions =
+    task?.channel && !channels.includes(task.channel)
+      ? [task.channel, ...channels]
+      : channels
   const router = useRouter()
   const [form, setForm] = useState<FormState>(() => fromTask(task))
   const [error, setError] = useState<string | null>(null)
@@ -250,6 +272,36 @@ export function TaskForm({ task }: { task?: TaskView }) {
               value={form.maxSteps}
               onChange={(e) => set("maxSteps", e.target.value)}
             />
+          </div>
+          <div className="grid gap-1.5">
+            <Label htmlFor="channel">Channel</Label>
+            <Select
+              value={form.channel}
+              onValueChange={(v) =>
+                set("channel", (v as string | null) ?? null)
+              }
+              items={[
+                { value: null, label: "None" },
+                ...channelOptions.map((c) => ({ value: c, label: c })),
+              ]}
+            >
+              <SelectTrigger id="channel" className="w-64">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value={null}>None</SelectItem>
+                {channelOptions.map((c) => (
+                  <SelectItem key={c} value={c}>
+                    {c}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <p className="text-xs text-muted-foreground">
+              Each run claims the next pending record from this channel; its
+              fields are added to the run&apos;s variables and appended to the
+              goal. The record is marked done or failed from the run result.
+            </p>
           </div>
         </CardContent>
       </Card>
