@@ -144,6 +144,25 @@ describe("run export", () => {
     expect(log).not.toContain(PNG.toString("base64"))
   })
 
+  it("adds the prompts and app cards the run started with and the current task", async () => {
+    const runId = await runOnce()
+    const { GET } = await import("@/app/api/runs/[id]/export/route")
+    const log = await (
+      await GET(new Request("http://app/x"), {
+        params: Promise.resolve({ id: runId }),
+      })
+    ).text()
+    expect(log).toContain("Prompt overrides: none (framework defaults)")
+    expect(log).toContain("App cards: none")
+    expect(log).toMatch(
+      /Task [0-9a-f]{24} \(current, updated .+; may differ from this run\):\n  Name: Export me\n  Start: -\n  Goal:\n    tap login/
+    )
+    expect(log).toContain("  Channel: -")
+    expect(log.indexOf("Goal:\n    tap login")).toBeLessThan(
+      log.indexOf("Events (")
+    )
+  })
+
   it("includes every LLM request and response, which the timeline leaves out", async () => {
     const runId = await runOnce()
     const { GET } = await import("@/app/api/runs/[id]/export/route")

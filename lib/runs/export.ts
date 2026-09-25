@@ -1,3 +1,5 @@
+import { ApiError } from "@/lib/api/errors"
+import { getRunInputs, type RunInputs } from "@/lib/runs/inputs"
 import {
   getRun,
   listRunEvents,
@@ -9,6 +11,7 @@ import {
   countElements,
   formatElements,
 } from "@/lib/runs/ui-elements"
+import { getTask, type TaskView } from "@/lib/tasks"
 
 export type RunExport = { fileName: string; text: string }
 
@@ -117,7 +120,65 @@ function describeLlmCall(head: string, p: Record<string, unknown>): string {
   return out.join("\n")
 }
 
-export function renderRunLog(run: RunView, events: RunEventView[]): string {
+/** What the run started with beyond its own fields, and the task as it is now. */
+export type RunContext = {
+  inputs?: RunInputs
+  /** The task today, or null once it has been deleted. */
+  task?: TaskView | null
+}
+
+function renderInputs(inputs: RunInputs): string[] {
+  const lines: string[] = []
+  const prompts = Object.entries(inputs.prompts)
+  lines.push(
+    "",
+    prompts.length
+      ? `Prompt overrides (${prompts.length}):`
+      : "Prompt overrides: none (framework defaults)"
+  )
+  for (const [role, text] of prompts)
+    lines.push(`  [${role}]`, indent(text, "    "))
+  lines.push(
+    "",
+    inputs.appCards.length
+      ? `App cards (${inputs.appCards.length}):`
+      : "App cards: none"
+  )
+  for (const card of inputs.appCards) {
+    const used = card.used === null ? "" : card.used ? " — used" : " — not used"
+    lines.push(
+      `  [${card.packageName}${card.name ? ` (${card.name})` : ""}${used}]`,
+      indent(card.content, "    ")
+    )
+  }
+  return lines
+}
+
+function renderTask(task: TaskView | null, run: RunView): string[] {
+  if (task === null)
+    return ["", `Task ${run.taskId} (current): deleted since this run`]
+  const lines = [
+    "",
+    `Task ${task.id} (current, updated ${task.updatedAt}; may differ from this run):`,
+    `  Name: ${task.name}`,
+    `  Start: ${task.start ? `${task.start.type}: ${task.start.value}` : "-"}`,
+    "  Goal:",
+    indent(task.goal, "    "),
+  ]
+  if (task.end) lines.push("  End:", indent(task.end, "    "))
+  lines.push(
+    `  Options: ${JSON.stringify(task.options)}`,
+    `  Variables: ${JSON.stringify(task.variables)}`,
+    `  Channel: ${task.channel ?? "-"}`
+  )
+  return lines
+}
+
+export function renderRunLog(
+  run: RunView,
+  events: RunEventView[],
+  context: RunContext = {}
+): string {
   const o = run.options
   const lines = [
     `Run ${run.id} — ${run.taskName}`,
@@ -140,6 +201,8 @@ export function renderRunLog(run: RunView, events: RunEventView[]): string {
     lines.push("", "End instruction:", indent(run.endInstruction, "  "))
   if (Object.keys(run.variables).length)
     lines.push("", `Variables: ${JSON.stringify(run.variables)}`)
+  if (context.inputs) lines.push(...renderInputs(context.inputs))
+  if (context.task !== undefined) lines.push(...renderTask(context.task, run))
   const llmCalls = events.filter((e) => e.type === "llm_call").length
   lines.push(
     "",
@@ -152,13 +215,22 @@ export function renderRunLog(run: RunView, events: RunEventView[]): string {
 
 /**
  * The run as one plain-text log for offline debugging: header, instruction,
- * then every stored event, including the element list of each step and the
- * raw request/response of every LLM call.
+ * the prompts and app cards it started with, the task as it is now, then every
+ * stored event, including the element list of each step and the raw
+ * request/response of every LLM call.
  */
 export async function buildRunExport(id: string): Promise<RunExport> {
-  const [run, events] = await Promise.all([
+  const [run, events, inputs] = await Promise.all([
     getRun(id),
     listRunEvents(id, -1, { withLlmCalls: true }),
+    getRunInputs(id),
   ])
-  return { fileName: `run-${run.id}.txt`, text: renderRunLog(run, events) }
+  const task = await getTask(run.taskId).catch((err: unknown) => {
+    if (err instanceof ApiError && err.code === "not_found") return null
+    throw err
+  })
+  return {
+    fileName: `run-${run.id}.txt`,
+    text: renderRunLog(run, events, { inputs, task }),
+  }
 }
