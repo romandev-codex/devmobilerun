@@ -295,20 +295,63 @@ def compose_goal(spec: RunSpec) -> str:
     memory = memory_section(spec.memory)
     if memory:
         goal = goal + "\n\n" + memory
-    if spec.reasoning or not spec.app_cards:
+    if spec.reasoning:
         return goal
     sections = []
-    for card in spec.app_cards:
-        package = str(card.get("packageName") or "").strip()
-        content = str(card.get("content") or "").strip()
-        if not package or not content:
-            continue
-        name = str(card.get("name") or "").strip()
+    for card in relevant_app_cards(spec):
+        package, name = card["packageName"], card["name"]
         title = f"{name} ({package})" if name else package
-        sections.append(f"### {title}\n{content}")
+        sections.append(f"### {title}\n{card['content']}")
     if not sections:
         return goal
     return goal + "\n\nApp guidance:\n" + "\n\n".join(sections)
+
+
+#: Package name parts too common to say which app a task is about.
+_GENERIC_PACKAGE_PARTS = frozenset(
+    {"com", "org", "net", "io", "co", "android", "google", "app", "apps", "mobile", "client", "lite", "free", "beta"}
+)
+
+
+def usable_app_cards(cards: list[dict[str, Any]]) -> list[dict[str, str]]:
+    """The cards with both a package and content, normalized to plain strings."""
+    usable = []
+    for card in cards:
+        package = str(card.get("packageName") or "").strip()
+        content = str(card.get("content") or "").strip()
+        if package and content:
+            usable.append({"packageName": package, "name": str(card.get("name") or "").strip(), "content": content})
+    return usable
+
+
+def _mentions(text: str, term: str) -> bool:
+    return re.search(rf"(?<![a-z0-9]){re.escape(term)}(?![a-z0-9])", text) is not None
+
+
+def relevant_app_cards(spec: RunSpec) -> list[dict[str, str]]:
+    """The cards for apps the task names, for modes that put cards in the goal.
+
+    Direct mode cannot load a card when an app comes to the foreground, so the
+    cards go into the goal up front; only those whose package, name or a
+    distinctive package part ("instagram" in com.instagram.android) appears in
+    the goal, start URL or end step are included, keeping unrelated apps' notes
+    out of every prompt.
+    """
+    text = " ".join(filter(None, [spec.instruction, spec.start_url, spec.end_instruction])).lower()
+    relevant = []
+    for card in usable_app_cards(spec.app_cards):
+        package = card["packageName"].lower()
+        terms = {package, card["name"].lower()} | {
+            part for part in package.split(".") if len(part) >= 4 and part not in _GENERIC_PACKAGE_PARTS
+        }
+        if any(term and _mentions(text, term) for term in terms):
+            relevant.append(card)
+    return relevant
+
+
+def app_card_event(card: dict[str, str], via: str) -> RunEvent:
+    """Reports that a card reached the model: ``via`` is "goal" or "foreground"."""
+    return RunEvent("app_card", {"packageName": card["packageName"], "name": card["name"], "via": via})
 
 
 def compose_end_instruction(spec: RunSpec) -> str:
@@ -363,6 +406,13 @@ class MobilerunAgentRun:
         from mobilerun.agent.droid import MobileAgent
         from mobilerun.config_manager import ConfigLoader
 
+        try:
+            from mobilerun.agent.manager.events import ManagerAppCardEvent
+
+            card_events: tuple[type, ...] = (ManagerAppCardEvent,)
+        except ImportError:  # a framework build without the event reports no cards
+            card_events = ()
+
         import asyncio
         import shutil
 
@@ -372,6 +422,9 @@ class MobilerunAgentRun:
         os.environ.setdefault("MOBILERUN_STREAM_SCREENSHOTS", "1")
         spec = self.spec
         cards_dir = write_app_cards_dir(spec.app_cards) if spec.reasoning else None
+        # Reasoning mode loads a card whenever its app is in the foreground; each
+        # card is reported the first time the manager actually loads it.
+        cards_by_package = {c["packageName"]: c for c in usable_app_cards(spec.app_cards)}
 
         def build() -> "MobileAgent":
             # Config loading and agent construction do file IO and LLM client setup;
@@ -402,10 +455,17 @@ class MobilerunAgentRun:
             handler = agent.run()
             self._handler = handler
             step_counter = [spec.step_offset]
+            if not spec.reasoning:
+                for card in relevant_app_cards(spec):
+                    yield app_card_event(card, "goal")
             async for raw in handler.stream_events():
                 mapped = map_framework_event(raw, step_counter)
                 if mapped is not None:
                     yield mapped
+                if isinstance(raw, card_events):
+                    card = cards_by_package.pop(raw.package_name, None)
+                    if card is not None:
+                        yield app_card_event(card, "foreground")
                 # A memory tool ran inside the step that produced this event;
                 # stream its edits right away so the app persists them even if
                 # the run later fails.

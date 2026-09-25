@@ -64,6 +64,18 @@ const ROWS: Record<string, RowSpec> = {
       </p>
     ),
   },
+  app_card: {
+    label: "app card",
+    body: (p) => (
+      <p className="text-xs">
+        <span className="font-mono">{String(p.packageName ?? "")}</span>
+        {p.name ? ` (${String(p.name)})` : ""}
+        <span className="text-muted-foreground">
+          {p.via === "goal" ? " added to the goal" : " loaded for the open app"}
+        </span>
+      </p>
+    ),
+  },
   plan: {
     label: "plan",
     body: (p) => (
@@ -230,6 +242,7 @@ export function RunTimeline({
       "action",
       "plan",
       "memory",
+      "app_card",
       "screenshot",
       "ui_state",
       "result",

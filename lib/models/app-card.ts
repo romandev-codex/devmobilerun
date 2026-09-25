@@ -3,7 +3,7 @@ import mongoose, { Schema, type InferSchemaType, type Model } from "mongoose"
 const appCardSchema = new Schema(
   {
     packageName: { type: String, required: true, unique: true },
-    name: { type: String, required: true, default: "" },
+    name: { type: String, default: "" },
     content: { type: String, required: true },
   },
   { timestamps: true }

@@ -574,9 +574,20 @@ describe("global prompts and app cards", () => {
       }),
       {}
     )
+    await appCards.POST(
+      new Request("http://app/x", {
+        method: "POST",
+        ...json({ packageName: "com.other.app", content: "Unused" }),
+      }),
+      {}
+    )
     const task = await createTask()
     const { body } = await runNow(task.id)
     script = [
+      {
+        event: "app_card",
+        data: { packageName: "com.example.app", name: "Ex", via: "foreground" },
+      },
       { event: "result", data: { success: true, reason: "ok", steps: 1 } },
     ]
     const { executeRun } = await import("@/lib/jobs/run-task")
@@ -585,13 +596,68 @@ describe("global prompts and app cards", () => {
       prompts: { manager_system: "Be terse." },
       appCards: [
         { packageName: "com.example.app", name: "Ex", content: "Tap login" },
+        { packageName: "com.other.app", name: "", content: "Unused" },
       ],
     })
-    const { run } = await getRun(body.run.id)
-    expect(run.prompts).toEqual({ manager_system: "Be terse." })
-    expect(run.appCards).toEqual([
-      { packageName: "com.example.app", name: "Ex", content: "Tap login" },
-    ])
+    const { getRunInputs } = await import("@/lib/runs/inputs")
+    expect(await getRunInputs(body.run.id)).toEqual({
+      prompts: { manager_system: "Be terse." },
+      appCards: [
+        {
+          packageName: "com.example.app",
+          name: "Ex",
+          content: "Tap login",
+          used: true,
+        },
+        {
+          packageName: "com.other.app",
+          name: "",
+          content: "Unused",
+          used: false,
+        },
+      ],
+    })
+  })
+
+  it("stores each distinct text once however many runs use it", async () => {
+    const { snapshotRunInputs } = await import("@/lib/runs/inputs")
+    const { TextSnapshot } = await import("@/lib/models/text-snapshot")
+    const card = { packageName: "com.example.app", name: "Ex", content: "Same" }
+    const first = await snapshotRunInputs({ manager_system: "Same" }, [card])
+    const second = await snapshotRunInputs({ manager_system: "Same" }, [card])
+    expect(second).toEqual(first)
+    expect(first.promptRefs.manager_system).toBe(first.appCardRefs[0].hash)
+    expect(await TextSnapshot.countDocuments({ text: "Same" })).toBe(1)
+  })
+
+  it("moves runs stored with full texts over to shared snapshots", async () => {
+    const { Run } = await import("@/lib/models/run")
+    const { getRunInputs, migrateRunInputs } = await import("@/lib/runs/inputs")
+    await syncDevices()
+    const task = await createTask()
+    const { body } = await runNow(task.id)
+    const _id = new mongoose.Types.ObjectId(body.run.id)
+    await Run.collection.updateOne(
+      { _id },
+      {
+        $set: {
+          prompts: { executor_system: "Old prompt" },
+          appCards: [{ packageName: "com.old.app", name: "", content: "Old" }],
+        },
+        $unset: { promptRefs: "", appCardRefs: "" },
+      }
+    )
+    expect(await migrateRunInputs()).toBeGreaterThanOrEqual(1)
+    expect(await migrateRunInputs()).toBe(0)
+    const raw = await Run.collection.findOne({ _id })
+    expect(raw).not.toHaveProperty("prompts")
+    expect(raw).not.toHaveProperty("appCards")
+    expect(await getRunInputs(body.run.id)).toEqual({
+      prompts: { executor_system: "Old prompt" },
+      appCards: [
+        { packageName: "com.old.app", name: "", content: "Old", used: null },
+      ],
+    })
   })
 })
 

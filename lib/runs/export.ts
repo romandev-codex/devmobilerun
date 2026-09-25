@@ -72,6 +72,8 @@ export function describeEvent(ev: RunEventView): string {
       return p.op === "delete"
         ? `${head} forget ${String(p.key)}`
         : `${head} ${String(p.key)} = ${String(p.value ?? "")}`
+    case "app_card":
+      return `${head} ${String(p.packageName)}${p.name ? ` (${String(p.name)})` : ""} via ${String(p.via ?? "")}`
     case "log":
       return `${head}${p.success === false ? " FAILED" : ""}: ${String(p.message ?? "")}`
     case "result":

@@ -17,6 +17,7 @@ from dataclasses import dataclass
 from typing import Any, AsyncIterator, Callable
 
 from ..events import RunEvent
+from ..framework import app_card_event, usable_app_cards
 from .actions import describe_action
 from .advisor import Advisor, load_advisor
 from .device import JevDevice, android_driver
@@ -149,12 +150,10 @@ def _decision_text(decision: dict[str, Any]) -> tuple[str, str]:
     return text, " · ".join(parts)
 
 
-def _app_guidance(cards: list[dict[str, Any]], package: str) -> str | None:
-    for card in cards:
-        if str(card.get("packageName") or "").strip() == package:
-            content = str(card.get("content") or "").strip()
-            if content:
-                return content[:4000]
+def _app_card(cards: list[dict[str, Any]], package: str) -> dict[str, str] | None:
+    for card in usable_app_cards(cards):
+        if card["packageName"] == package:
+            return card
     return None
 
 
@@ -221,6 +220,7 @@ class JevAgentRun:
             base_context["taskMemory"] = dict(spec.memory)
 
         step_index = spec.step_offset
+        cards_reported: set[str] = set()
         history: list[dict[str, Any]] = []
         # Actions already tried on the current screen; cleared whenever the screen changes.
         repeated: set[str] = set()
@@ -252,9 +252,12 @@ class JevAgentRun:
         # Stale decisions never dispatch input, but still consume a separate model-call budget.
         for _attempt in range(max_steps * 2 + 4):
             context = dict(base_context)
-            guidance = _app_guidance(spec.app_cards, observation["phone"]["packageName"])
-            if guidance:
-                context["appGuidance"] = guidance
+            card = _app_card(spec.app_cards, observation["phone"]["packageName"])
+            if card is not None:
+                context["appGuidance"] = card["content"][:4000]
+                if card["packageName"] not in cards_reported:
+                    cards_reported.add(card["packageName"])
+                    yield app_card_event(card, "foreground")
             if advisor is not None and advisor.notes:
                 context["progressNotes"] = advisor.notes
             decision, png = await asyncio.gather(

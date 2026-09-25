@@ -45,9 +45,14 @@ const runSchema = new Schema(
     endInstruction: { type: String, default: null },
     options: { type: runOptionsSchema, required: true },
     variables: { type: Schema.Types.Mixed, default: {} },
-    /** Global prompt overrides and app cards the run was started with. */
-    prompts: { type: Schema.Types.Mixed, default: {} },
-    appCards: { type: Schema.Types.Mixed, default: [] },
+    /**
+     * Global prompt overrides and app cards the run was started with, as
+     * hashes into TextSnapshot: role → hash, and one entry per card.
+     */
+    promptRefs: { type: Schema.Types.Mixed, default: {} },
+    appCardRefs: { type: Schema.Types.Mixed, default: [] },
+    /** True when the executor reports each card it used as an `app_card` event. */
+    cardUsageTracked: { type: Boolean, default: false },
     startedAt: { type: Date, default: null },
     finishedAt: { type: Date, default: null },
     result: {

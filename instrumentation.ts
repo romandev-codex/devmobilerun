@@ -8,6 +8,14 @@ export async function register() {
     } catch (err) {
       console.error("[app-cards] migration from settings failed", err)
     }
+    try {
+      const { migrateRunInputs } = await import("@/lib/runs/inputs")
+      const moved = await migrateRunInputs()
+      if (moved > 0)
+        console.log(`[runs] moved ${moved} run(s) to shared prompt/card texts`)
+    } catch (err) {
+      console.error("[runs] prompt/card snapshot migration failed", err)
+    }
     const { startAgenda } = await import("@/lib/jobs/agenda")
     try {
       await startAgenda()

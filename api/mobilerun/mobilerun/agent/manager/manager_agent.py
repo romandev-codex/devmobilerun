@@ -31,6 +31,7 @@ from pydantic import BaseModel
 from mobilerun.agent.common.events import RecordUIStateEvent, ScreenshotEvent
 from mobilerun.agent.droid.events import ExternalUserMessageAppliedEvent
 from mobilerun.agent.manager.events import (
+    ManagerAppCardEvent,
     ManagerContextEvent,
     ManagerPlanDetailsEvent,
     ManagerResponseEvent,
@@ -425,6 +426,12 @@ class ManagerAgent(Workflow):
                     package_name=self.shared_state.current_package_name,
                     instruction=self.shared_state.instruction,
                 )
+                if self.shared_state.app_card:
+                    ctx.write_event_to_stream(
+                        ManagerAppCardEvent(
+                            package_name=self.shared_state.current_package_name
+                        )
+                    )
             except Exception as e:
                 logger.warning(f"Error loading app card: {e}")
                 self.shared_state.app_card = ""

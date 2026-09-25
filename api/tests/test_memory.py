@@ -68,7 +68,7 @@ def test_goal_carries_memory_in_both_modes():
 
     cards = [{"packageName": "com.example", "content": "Tap login first"}]
     with_cards = compose_goal(
-        RunSpec(run_id="r", device_serial="s", instruction="Do it", memory=memory, app_cards=cards)
+        RunSpec(run_id="r", device_serial="s", instruction="Do it in Example", memory=memory, app_cards=cards)
     )
     assert with_cards.index("Memory from previous runs") < with_cards.index("App guidance:")
     assert compose_goal(RunSpec(run_id="r", device_serial="s", instruction="Do it")) == "Do it"

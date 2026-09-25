@@ -2,12 +2,14 @@ import { Download } from "lucide-react"
 import { notFound } from "next/navigation"
 
 import { PageHeader } from "@/components/app/page-header"
+import { RunInputsDetails } from "@/components/runs/run-inputs"
 import { RunMeta } from "@/components/runs/run-summary"
 import { DeleteRunButton } from "@/components/runs/delete-run-button"
 import { RunTimeline } from "@/components/runs/run-timeline"
 import { buttonVariants } from "@/components/ui/button"
 import { ApiError } from "@/lib/api/errors"
 import { deviceLabel, getDevice } from "@/lib/devices"
+import { getRunInputs } from "@/lib/runs/inputs"
 import { getRun, isTerminal, listRunEvents } from "@/lib/runs/service"
 import { cn } from "@/lib/utils"
 
@@ -23,9 +25,10 @@ export default async function RunPage({
     if (err instanceof ApiError && err.status === 404) notFound()
     throw err
   })
-  const [events, device] = await Promise.all([
+  const [events, device, inputs] = await Promise.all([
     listRunEvents(id),
     getDevice(run.deviceSerial).catch(() => null),
+    getRunInputs(id),
   ])
   return (
     <div>
@@ -58,34 +61,11 @@ export default async function RunPage({
               </>
             ) : null}
           </details>
-          {Object.keys(run.prompts).length > 0 || run.appCards.length > 0 ? (
-            <details className="text-sm">
-              <summary className="cursor-pointer text-muted-foreground">
-                Prompt overrides and app cards used
-              </summary>
-              <div className="mt-2 grid gap-2 text-xs">
-                {Object.entries(run.prompts).map(([role, text]) => (
-                  <div key={role}>
-                    <p className="font-mono">{role}</p>
-                    <pre className="max-h-48 overflow-auto rounded bg-muted p-2 whitespace-pre-wrap">
-                      {text}
-                    </pre>
-                  </div>
-                ))}
-                {run.appCards.map((c) => (
-                  <div key={c.packageName}>
-                    <p className="font-mono">
-                      {c.packageName}
-                      {c.name ? ` (${c.name})` : ""}
-                    </p>
-                    <pre className="max-h-48 overflow-auto rounded bg-muted p-2 whitespace-pre-wrap">
-                      {c.content}
-                    </pre>
-                  </div>
-                ))}
-              </div>
-            </details>
-          ) : null}
+          <RunInputsDetails
+            inputs={inputs}
+            options={run.options}
+            running={!isTerminal(run.status)}
+          />
           <div className="grid gap-2">
             <a
               href={`/api/runs/${run.id}/export`}

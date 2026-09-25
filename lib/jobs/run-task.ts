@@ -7,6 +7,7 @@ import { connectDb } from "@/lib/db"
 import { checkDeviceThermal } from "@/lib/device-thermal"
 import { executor, ExecutorError } from "@/lib/executor/client"
 import { Run } from "@/lib/models/run"
+import { snapshotRunInputs } from "@/lib/runs/inputs"
 import {
   applyScreenshotRetention,
   storeScreenshot,
@@ -76,8 +77,8 @@ export async function executeRun(runId: string): Promise<void> {
   const started = await transitionRun(run._id, "queued", {
     status: "running",
     startedAt: new Date(),
-    prompts: settings.prompts,
-    appCards,
+    ...(await snapshotRunInputs(settings.prompts, appCards)),
+    cardUsageTracked: true,
   })
   if (!started) {
     // Stopped between the read above and this write; the stop released nothing yet.

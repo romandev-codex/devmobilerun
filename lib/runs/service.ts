@@ -36,8 +36,6 @@ export type RunView = {
   endInstruction: string | null
   options: TaskOptions
   variables: Record<string, string>
-  prompts: Record<string, string>
-  appCards: { packageName: string; name: string; content: string }[]
   startedAt: string | null
   finishedAt: string | null
   result: { success: boolean; reason: string; steps: number } | null
@@ -69,8 +67,6 @@ export function toRunView(doc: RunDoc): RunView {
     endInstruction: doc.endInstruction ?? null,
     options: toTaskOptions(doc.options),
     variables: (doc.variables as Record<string, string>) ?? {},
-    prompts: (doc.prompts as Record<string, string>) ?? {},
-    appCards: (doc.appCards as RunView["appCards"]) ?? [],
     startedAt: doc.startedAt ? doc.startedAt.toISOString() : null,
     finishedAt: doc.finishedAt ? doc.finishedAt.toISOString() : null,
     result: doc.result
@@ -420,9 +416,9 @@ export async function listRuns(query: unknown): Promise<RunPage> {
   if (q.status) filter.status = q.status
   if (q.trigger) filter.trigger = q.trigger
   if (q.before) filter._id = { $lt: asObjectId(q.before) }
-  // Lists never render the prompt/app card snapshots or the instructions; skip them.
+  // Lists never render the prompt/app card refs or the instructions; skip them.
   const docs = await Run.find(filter)
-    .select("-prompts -appCards -instruction -endInstruction")
+    .select("-promptRefs -appCardRefs -instruction -endInstruction")
     .sort({ _id: -1 })
     .limit(q.limit + 1)
     .lean<RunDoc[]>()

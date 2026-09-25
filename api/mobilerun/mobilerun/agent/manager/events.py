@@ -25,6 +25,12 @@ class ManagerResponseEvent(Event):
     usage: Optional[UsageResult] = None
 
 
+class ManagerAppCardEvent(Event):
+    """An app card was loaded into the manager's context for the foreground app."""
+
+    package_name: str
+
+
 class ManagerPlanDetailsEvent(Event):
     """Plan parsed and ready (internal event with full details)."""
 

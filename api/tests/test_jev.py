@@ -341,6 +341,20 @@ async def test_session_taps_then_reports_done():
     assert "not independently verified" in events[-1].payload["reason"]
 
 
+async def test_session_reports_each_app_card_once_when_its_app_is_on_screen():
+    driver = FakeDriver(LAUNCHER, _open_settings)
+    jev = ScriptedJev([("TAP", "Settings"), ("DONE", None)])
+    cards = [
+        {"packageName": "com.android.settings", "name": "Settings", "content": "Wi-Fi is under Network"},
+        {"packageName": "com.android.deskclock", "name": "", "content": "unused"},
+    ]
+    events = await run_session(driver, jev, app_cards=cards)
+    used = [e.payload for e in events if e.type == "app_card"]
+    assert used == [{"packageName": "com.android.settings", "name": "Settings", "via": "foreground"}]
+    assert "appGuidance" not in jev.bodies[0]["state"]
+    assert jev.bodies[1]["state"]["appGuidance"] == "Wi-Fi is under Network"
+
+
 async def test_session_numbers_steps_from_the_offset():
     driver = FakeDriver(LAUNCHER)
     events = await run_session(driver, ScriptedJev([("DONE", None)]), step_offset=7)
