@@ -25,6 +25,9 @@ MAX_APPS = 200
 MAX_TEXT_CANDIDATES = 254
 #: Below this confidence (operation or target) Jev's answer goes to the advisor, when there is one.
 ADVISE_BELOW = 0.5
+#: A run of this many identical operations (e.g. scrolling a feed) is sent to the advisor, and again
+#: every this many steps after: Jev keeps no count, so a confident streak would otherwise never end.
+ADVISE_EVERY_STREAK = 5
 #: Requests per step before a malformed Jev answer is given up on.
 JEV_ATTEMPTS = 2
 #: Controls that undo or destroy something. They are offered only when the goal names the word,
@@ -341,22 +344,34 @@ def _validated(answers: dict[str, Any], name: str, questions: dict[str, Any]) ->
         raise PolicyError(f"{exc} ({name}: {json.dumps(answers.get(name), default=str)[:200]})") from exc
 
 
+def _streak(history: list[dict[str, Any]], operation: str) -> int:
+    """How many of the latest actions were ``operation``, counting the one now proposed."""
+    count = 1
+    for entry in reversed(history):
+        if entry.get("operation") != operation:
+            break
+        count += 1
+    return count
+
+
 def _needs_advice(
     space: dict[str, Any],
     operation: str,
     target: str | None,
     operation_answer: dict[str, Any],
     target_answer: dict[str, Any] | None,
+    history: list[dict[str, Any]] | None = None,
 ) -> bool:
-    """Weak Jev answers: unsure, ending the run, or re-tapping an item already handled."""
+    """Weak Jev answers: unsure, ending the run, re-tapping an item already handled, or a long streak."""
     if operation in ("DONE", "BLOCKED") or operation_answer["confidence"] < ADVISE_BELOW:
         return True
     if target_answer is not None and target_answer["confidence"] < ADVISE_BELOW:
         return True
     if operation == "TAP":
         entry = next((e for e in space["elements"] if e["index"] == target), None)
-        return bool(entry and (entry.get("tappedBefore") or entry["label"].startswith("unlabeled control")))
-    return False
+        if entry and (entry.get("tappedBefore") or entry["label"].startswith("unlabeled control")):
+            return True
+    return _streak(history or [], operation) % ADVISE_EVERY_STREAK == 0
 
 
 def _target_head(operation: str) -> str | None:
@@ -475,7 +490,7 @@ class TypeSafePolicy:
         advice_error: str | None = None
         if self.advisor is not None and (
             jev_error is not None
-            or _needs_advice(space, operation, target, operation_answer, target_answer)
+            or _needs_advice(space, operation, target, operation_answer, target_answer, history)
         ):
             proposal = None if jev_error is not None else {"operation": operation, "target": target}
             try:
@@ -485,6 +500,7 @@ class TypeSafePolicy:
                     questions=space["questions"],
                     proposal=proposal,
                     screen=_screen_rows(observation, space),
+                    step=len(history),
                 )
             except Exception as exc:  # noqa: BLE001 - Jev's own answer still stands
                 if jev_error is not None:

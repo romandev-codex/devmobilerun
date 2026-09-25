@@ -11,6 +11,7 @@ import asyncio
 import base64
 import logging
 import os
+import re
 import time
 from collections import Counter, defaultdict
 from dataclasses import dataclass
@@ -22,6 +23,7 @@ from .actions import describe_action
 from .advisor import Advisor, load_advisor
 from .device import JevDevice, android_driver
 from .policy import (
+    _names_app,
     DEFAULT_BASE_URL,
     DEFAULT_MODEL,
     OPENROUTER_BASE_URL,
@@ -41,6 +43,13 @@ REQUEST_TIMEOUT_S = 30.0
 #: Taps of one element on an identical screen before it is no longer offered there. Returning
 #: to a screen and tapping the same control once more is normal; a third time is a cycle.
 MAX_TAPS_PER_SCREEN = 2
+#: Executions of one non-tap action (BACK, HOME, OPEN_APP, a scroll) on an identical screen before the
+#: session stops. Taps are covered by MAX_TAPS_PER_SCREEN; this catches loops such as HOME → open the
+#: app → HOME → open the app, which never leave a screen unchanged and so never look stuck.
+MAX_REPEATS_PER_SCREEN = 3
+#: Advisor notes older than this many actions are no longer shown to Jev: a stale "currently
+#: viewing X" misleads more than no notes at all.
+NOTES_MAX_AGE = 5
 
 #: Why a session ended, as the run's result reason. ``done`` is the only success.
 OUTCOMES = {
@@ -50,6 +59,7 @@ OUTCOMES = {
     "uncertain": "Jev's confidence was below the threshold.",
     "step_limit": "Reached the step limit.",
     "stuck": "Jev repeated an action on an unchanged screen.",
+    "cycle": "Jev kept repeating the same action on the same screen, going round in a loop.",
     "loading_timeout": "The screen kept loading past the wait limit.",
     "unstable_screen": "The screen kept changing before an action could be executed.",
     "input_unverified": "Text was sent, but the field did not show the complete value. Inspect the screen before retrying.",
@@ -157,6 +167,40 @@ def _app_card(cards: list[dict[str, Any]], package: str) -> dict[str, str] | Non
     return None
 
 
+#: A goal that only asks to close an app: "close app", "Close the Instagram app", "quit instagram".
+_CLOSE_APP = re.compile(
+    r"^\s*(?:please\s+)?(?:close|exit|quit|kill|force[- ]?stop)\s+(?:the\s+)?(?P<name>.*?)\s*[.!]?\s*$",
+    re.IGNORECASE,
+)
+_GENERIC_APP = {"", "app", "application", "it", "this app", "the app", "current app"}
+
+
+def _is_launcher(package: str) -> bool:
+    return not package or "launcher" in package.lower() or package == "com.android.systemui"
+
+
+def close_app_target(
+    instruction: str, context: str, foreground: str, apps: list[dict[str, str]]
+) -> dict[str, str] | None:
+    """The app a "close the app" instruction means, or ``None`` when the model should handle it.
+
+    A named app wins; "the app" means the foreground app, or, from the home screen, the one app the
+    surrounding task (``context``) names. Closing is done in code: a model asked to "close app" from
+    a context that names the app tends to open it again to find a close button.
+    """
+    match = _CLOSE_APP.match(instruction or "")
+    if not match:
+        return None
+    name = re.sub(r"\s+(?:app|application)$", "", match.group("name").strip(), flags=re.IGNORECASE)
+    if name.lower() not in _GENERIC_APP:
+        named = [a for a in apps if a["label"].strip().lower() == name.lower()]
+        return named[0] if len(named) == 1 else None
+    if not _is_launcher(foreground):
+        return next((a for a in apps if a["packageName"] == foreground), None)
+    named = [a for a in apps if _names_app(context, a["label"])]
+    return named[0] if len(named) == 1 else None
+
+
 class JevAgentRun:
     """Drives Jev on a local phone and yields normalized events."""
 
@@ -226,6 +270,8 @@ class JevAgentRun:
         repeated: set[str] = set()
         # Taps over the whole run: by screen fingerprint (cycle guard) and by package and label (hint).
         screen_taps: defaultdict[str, Counter[str]] = defaultdict(Counter)
+        # Every non-tap action executed, by screen and action, over the whole run (cycle guard).
+        executed: Counter[str] = Counter()
         label_taps: defaultdict[str, Counter[str]] = defaultdict(Counter)
         consecutive_waits = consecutive_stale = 0
         waiting_since: float | None = None
@@ -249,6 +295,14 @@ class JevAgentRun:
         if advisor is not None:
             yield RunEvent("log", {"message": f"Jev advisor: {advisor.model} (asked when Jev is unsure)"})
 
+        close = close_app_target(
+            spec.focus or goal, goal, observation["phone"]["packageName"], installed_apps
+        )
+        if close is not None:
+            async for event in self._close_app(device, close, observation, step_index, screenshot):
+                yield event
+            return
+
         # Stale decisions never dispatch input, but still consume a separate model-call budget.
         for _attempt in range(max_steps * 2 + 4):
             context = dict(base_context)
@@ -258,7 +312,12 @@ class JevAgentRun:
                 if card["packageName"] not in cards_reported:
                     cards_reported.add(card["packageName"])
                     yield app_card_event(card, "foreground")
-            if advisor is not None and advisor.notes:
+            if (
+                advisor is not None
+                and advisor.notes
+                and advisor.notes_step is not None
+                and len(history) - advisor.notes_step <= NOTES_MAX_AGE
+            ):
                 context["progressNotes"] = advisor.notes
             decision, png = await asyncio.gather(
                 policy.decide(
@@ -302,6 +361,10 @@ class JevAgentRun:
             if not is_wait and signature in repeated:
                 yield result("stuck", decision)
                 return
+            loops = not is_wait and action["type"] != "tap-element"
+            if loops and executed[signature] >= MAX_REPEATS_PER_SCREEN:
+                yield result("cycle", decision)
+                return
             if is_wait:
                 waiting_since = waiting_since or time.monotonic()
                 if time.monotonic() - waiting_since >= WAIT_TIMEOUT_S:
@@ -341,6 +404,8 @@ class JevAgentRun:
                 return
             consecutive_stale = 0
             repeated.add(signature)
+            if loops:
+                executed[signature] += 1
             consecutive_waits = consecutive_waits + 1 if is_wait else 0
             entry: dict[str, Any] = {
                 "operation": decision["operation"],
@@ -386,3 +451,34 @@ class JevAgentRun:
                 repeated.clear()
             observation = after
         yield result("decision_limit")
+
+    async def _close_app(
+        self,
+        device: JevDevice,
+        app: dict[str, str],
+        observation: dict[str, Any],
+        step: int,
+        screenshot: Callable[[], Any],
+    ) -> AsyncIterator[RunEvent]:
+        """Closes ``app`` without asking a model: force-stop, then the home screen."""
+        png = await screenshot()
+        if png is not None:
+            yield RunEvent("screenshot", {"step": step, "png": base64.b64encode(png).decode("ascii")})
+        yield RunEvent("ui_state", {"step": step, "elements": _ui_elements(observation)})
+        label = f"Close {app['label']}"
+        yield RunEvent(
+            "thought",
+            {"text": f"CLOSE_APP: {label}", "description": "handled in code: force-stop, then home", "source": "jev"},
+        )
+        args = {"type": "close-app", "packageName": app["packageName"], "appLabel": app["label"]}
+        try:
+            await device.close_app(app["packageName"])
+        except Exception as exc:  # noqa: BLE001 - reported, never retried
+            yield RunEvent("action", {"tool": "close_app", "args": args, "success": False, "summary": f"{label} — {exc}"})
+            yield RunEvent("result", {"success": False, "reason": f"Action failed: {exc}", "steps": 0})
+            return
+        yield RunEvent("action", {"tool": "close_app", "args": args, "success": True, "summary": label})
+        yield RunEvent(
+            "result",
+            {"success": True, "reason": f"Closed {app['label']} (force-stopped, home screen shown).", "steps": 1},
+        )

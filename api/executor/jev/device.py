@@ -39,6 +39,8 @@ class Driver(Protocol):
 
     async def start_app(self, package: str, activity: str | None = None) -> str: ...
 
+    async def stop_app(self, package: str) -> str: ...
+
 
 def android_driver(serial: str) -> Driver:
     """The framework's adb driver with Portal required: Jev needs its full UI tree."""
@@ -70,6 +72,13 @@ class JevDevice:
 
     async def screenshot(self) -> bytes:
         return await self.driver.screenshot(hide_overlay=True)
+
+    async def close_app(self, package: str) -> None:
+        """Force-stops an installed app, then shows the home screen."""
+        if not any(a["packageName"] == package for a in self.installed_apps):
+            raise ValueError("The app was not observed in the installed-app list.")
+        await self.driver.stop_app(package)
+        await self.driver.press_button("home")
 
     async def act(
         self, action: dict[str, Any], *, expected: dict[str, Any] | None = None, max_age_ms: float = 30_000

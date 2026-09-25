@@ -18,7 +18,7 @@ from executor.jev.policy import (
     text_candidates,
     validate_choice,
 )
-from executor.jev.run import JevAgentRun, JevConfig, httpx_transport, jev_config
+from executor.jev.run import JevAgentRun, JevConfig, close_app_target, httpx_transport, jev_config
 from executor.jev.state import StaleObservationError, assert_fresh, summarize_state
 
 pytestmark = pytest.mark.anyio
@@ -106,6 +106,10 @@ class FakeDriver:
 
     async def start_app(self, package: str, activity: str | None = None) -> str:
         await self._record("start_app", package)
+        return "ok"
+
+    async def stop_app(self, package: str) -> str:
+        await self._record("stop_app", package)
         return "ok"
 
 
@@ -678,3 +682,116 @@ async def test_start_run_rejects_an_unknown_agent(client):
         json={"runId": "x", "deviceSerial": SERIAL, "instruction": "x", "options": {"agent": "gpt"}},
     )
     assert res.status_code == 422
+
+
+# ── loops, streaks and closing apps ──────────────────────────────────────
+
+
+async def test_session_stops_a_home_and_reopen_loop_between_two_screens():
+    def navigate(driver: FakeDriver, action: tuple) -> None:
+        driver.state = SETTINGS if action[0] == "start_app" else LAUNCHER
+
+    driver = FakeDriver(LAUNCHER, navigate)
+    jev = ScriptedJev([("OPEN_APP", "Settings"), ("HOME", None)] * 5)
+    events = await run_session(driver, jev, max_steps=20)
+    # Each screen changes after every action, so only the run-wide count catches the loop.
+    assert driver.actions == [("start_app", "com.android.settings"), ("button", "home")] * 3
+    assert events[-1].payload["success"] is False
+    assert events[-1].payload["reason"].startswith("Jev kept repeating the same action")
+
+
+def _feed(driver: FakeDriver, action: tuple) -> None:
+    if action[0] == "swipe":
+        n = int(driver.state["a11y_tree"]["children"][0]["text"].split()[-1]) + 1
+        driver.state = _reel(n)
+
+
+def _reel(n: int) -> dict[str, Any]:
+    return raw_state(node((0, 100, 1080, 2000), text=f"reel {n}", isScrollable=True), package="com.example.reels")
+
+
+async def test_session_asks_the_advisor_during_a_long_confident_streak_and_drops_stale_notes():
+    prompts: list[dict[str, Any]] = []
+
+    async def complete(system: str, user: str) -> str:
+        prompts.append(json.loads(user))
+        scroll = next(iter(prompts[-1]["targets"]["scroll_target"]))
+        if len(prompts) == 1:
+            return json.dumps({"operation": "SCROLL_DOWN", "target": scroll, "notes": "watched 1"})
+        if len(prompts) == 2:
+            return json.dumps({"operation": "SCROLL_DOWN", "target": scroll})  # keeps the old notes
+        return '{"operation": "DONE", "target": null, "notes": "watched 10"}'
+
+    driver = FakeDriver(_reel(0), _feed)
+    jev = ScriptedJev([("SCROLL_DOWN", "reel")] * 12, confidence=0.95)
+
+    # The first answer is unsure so the advisor writes notes at step 0; the rest are confident.
+    original = jev.__call__
+
+    async def first_unsure(body):
+        jev.confidence = 0.3 if not jev.bodies else 0.95
+        return await original(body)
+
+    agent = JevAgentRun(
+        spec(max_steps=20, instruction="Watch 10 reels"),
+        config=JevConfig(api_key="k", model="jev-latest"),
+        device=JevDevice(driver, SERIAL),
+        transport=first_unsure,
+        advisor=Advisor(complete, "executor:big"),
+        sleep=_no_sleep,
+    )
+    events = [e async for e in agent.events()]
+
+    # Asked at step 0 (unsure), then at the 5th and 10th scroll in a row despite high confidence.
+    assert [p["stepsTaken"] for p in prompts] == [0, 4, 9]
+    assert prompts[1]["notesWrittenAtStep"] == 0
+    assert jev.bodies[5]["state"]["progressNotes"] == "watched 1"  # 5 actions old: still shown
+    assert "progressNotes" not in jev.bodies[6]["state"]  # 6 actions old: dropped
+    assert len([a for a in driver.actions if a[0] == "swipe"]) == 9
+    assert events[-1].payload["success"] is True
+
+
+async def test_close_app_end_step_force_stops_the_foreground_app_without_asking_jev():
+    driver = FakeDriver(SETTINGS)
+    jev = ScriptedJev([])
+    events = await run_session(
+        driver, jev, instruction="An earlier session opened Settings.\n\nclose app", focus="close app"
+    )
+    assert jev.bodies == []
+    assert driver.actions == [("stop_app", "com.android.settings"), ("button", "home")]
+    action = next(e for e in events if e.type == "action")
+    assert action.payload["tool"] == "close_app" and action.payload["success"] is True
+    assert events[-1].payload["success"] is True
+
+
+async def test_close_app_from_the_home_screen_closes_the_app_the_task_named():
+    driver = FakeDriver(LAUNCHER)
+    events = await run_session(
+        driver, ScriptedJev([]), instruction="Set an alarm in Clock.\n\nclose app", focus="close app"
+    )
+    assert driver.actions == [("stop_app", "com.android.deskclock"), ("button", "home")]
+    assert events[-1].payload["success"] is True
+
+
+APPS = [
+    {"packageName": "com.instagram.android", "label": "Instagram"},
+    {"packageName": "com.instagram.barcelona", "label": "Threads"},
+]
+
+
+@pytest.mark.parametrize(
+    "instruction, context, foreground, expected",
+    [
+        ("close app", "Open instagram app, scroll reels", "com.sec.android.app.launcher", "com.instagram.android"),
+        ("Close the Instagram app.", "", "com.sec.android.app.launcher", "com.instagram.android"),
+        ("quit threads", "", "com.instagram.android", "com.instagram.barcelona"),
+        ("close app", "", "com.instagram.android", "com.instagram.android"),
+        ("close app", "compare Instagram and Threads", "com.sec.android.app.launcher", None),  # ambiguous
+        ("close app and report the total", "", "com.instagram.android", None),  # more than closing
+        ("report the total", "Instagram", "com.instagram.android", None),  # not a close step
+        ("close the unknown app", "", "com.instagram.android", None),
+    ],
+)
+def test_close_app_target(instruction, context, foreground, expected):
+    target = close_app_target(instruction, context, foreground, APPS)
+    assert (target or {}).get("packageName") == expected

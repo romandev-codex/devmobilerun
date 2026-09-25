@@ -38,7 +38,12 @@ SYSTEM = (
     "'tapped Nx earlier' were already handled: pick an unhandled one, or SCROLL the list to reveal more "
     "when all visible ones are handled. Do not tap an unlabeled control on a guess; prefer a labeled "
     "control, SCROLL or BACK. Keep the notes up to date: what is done, what was skipped, counters the "
-    "goal asks for, and what to do next. Reply with one JSON object only: "
+    "goal asks for, and what to do next. You are not asked every step: stepsTaken and notesWrittenAtStep "
+    "tell how many actions ran since your notes, and recentActions shows them, so bring counts forward "
+    "from those (each SCROLL that changed the screen in a feed of full-screen videos moves to the next "
+    "video). When a count the goal asks for is reached, choose DONE: a count kept in your notes is "
+    "enough evidence, it will never be visible on the screen. When the goal is only to close or leave "
+    "an app and the home screen is showing, choose DONE. Reply with one JSON object only: "
     '{"operation": "...", "target": "<key or null>", "targetLabel": "<the chosen option\'s text>", '
     '"notes": "...", "reason": "<one short sentence>"}'
 )
@@ -49,6 +54,8 @@ class Advisor:
         self.complete = complete
         self.model = model
         self.notes = ""
+        #: The session step at which :attr:`notes` were last written, or ``None`` before any.
+        self.notes_step: int | None = None
 
     async def choose(
         self,
@@ -58,8 +65,12 @@ class Advisor:
         questions: dict[str, Any],
         proposal: dict[str, Any] | None,
         screen: list[dict[str, Any]] | None = None,
+        step: int | None = None,
     ) -> dict[str, Any]:
-        """Returns ``{"operation", "target", "reason"}`` validated against ``questions``."""
+        """Returns ``{"operation", "target", "reason"}`` validated against ``questions``.
+
+        ``step`` is the number of actions the session has taken so far.
+        """
         operations = questions["operation"]["criteria"]
         targets = {
             name: question["criteria"] for name, question in questions.items() if name != "operation"
@@ -74,6 +85,10 @@ class Advisor:
             "notes": self.notes,
             "smallModelProposal": proposal,
         }
+        if step is not None:
+            payload["stepsTaken"] = step
+            if self.notes_step is not None:
+                payload["notesWrittenAtStep"] = self.notes_step
         for key in ("taskVariables", "taskMemory", "appGuidance", "focusedField"):
             if state.get(key):
                 payload[key] = state[key]
@@ -98,6 +113,7 @@ class Advisor:
         notes = reply.get("notes")
         if isinstance(notes, str) and notes.strip():
             self.notes = notes.strip()[:MAX_NOTES_CHARS]
+            self.notes_step = step
         return {"operation": operation, "target": target, "reason": str(reply.get("reason") or "").strip()}
 
 
