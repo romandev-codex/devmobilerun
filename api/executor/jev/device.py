@@ -73,6 +73,10 @@ class JevDevice:
     async def screenshot(self) -> bytes:
         return await self.driver.screenshot(hide_overlay=True)
 
+    async def wake(self) -> None:
+        """Presses HOME: turns a sleeping screen on and starts the task from the home screen."""
+        await self.driver.press_button("home")
+
     async def close_app(self, package: str) -> None:
         """Force-stops an installed app, then shows the home screen."""
         if not any(a["packageName"] == package for a in self.installed_apps):

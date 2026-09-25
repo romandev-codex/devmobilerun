@@ -303,6 +303,24 @@ class JevAgentRun:
                 yield event
             return
 
+        # Wake the device before the first decision; a failed press is not fatal.
+        try:
+            await device.wake()
+        except Exception as exc:  # noqa: BLE001 - the task may still run on an awake screen
+            yield RunEvent("log", {"message": f"HOME press to wake the device failed: {exc}"})
+        else:
+            yield RunEvent("log", {"message": "Pressed HOME to wake the device"})
+            deadline = time.monotonic() + SETTLE_TIMEOUT_S
+            woken = await device.observe()
+            # Let the launcher replace the previous screen before Jev looks at it.
+            while (
+                (woken["fingerprint"] == observation["fingerprint"] or not woken["phone"]["packageName"])
+                and time.monotonic() + POLL_S < deadline
+            ):
+                await self._sleep(POLL_S)
+                woken = await device.observe()
+            observation = woken
+
         # Stale decisions never dispatch input, but still consume a separate model-call budget.
         for _attempt in range(max_steps * 2 + 4):
             context = dict(base_context)
