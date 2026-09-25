@@ -200,12 +200,12 @@ describe("schedules", () => {
     expect(await pendingTicks(id)).toBe(1)
   })
 
-  it("skips and records the tick when the device is busy or offline, without counting it", async () => {
+  it("waits for a busy device instead of skipping a whole interval", async () => {
     const t = await task("busy")
     const { body } = await create({
       taskId: t,
       deviceSerial: "A",
-      intervalSeconds: 30,
+      intervalSeconds: 3600,
     })
     const id = body.schedule.id as string
     const { Device } = await import("@/lib/models/device")
@@ -213,8 +213,36 @@ describe("schedules", () => {
       { serial: "A" },
       { $set: { activeRunId: new mongoose.Types.ObjectId() } }
     )
-    await tick(id)
-    await Device.updateOne({ serial: "A" }, { $set: { activeRunId: null } })
+    const before = Date.now()
+    try {
+      await tick(id)
+    } finally {
+      await Device.updateOne({ serial: "A" }, { $set: { activeRunId: null } })
+    }
+
+    // No skip; it stays due (so queue dispatch leaves the device to it) and
+    // tries again within seconds rather than an hour later.
+    expect(await runsFor(id)).toHaveLength(0)
+    const s = await get(id)
+    expect(s.runCount).toBe(0)
+    expect(new Date(s.nextRunAt).getTime()).toBeLessThanOrEqual(Date.now())
+    const job = await mongoose.connection
+      .db!.collection("agendaJobs")
+      .findOne({ name: "schedule-tick", "data.scheduleId": id })
+    const retryAt = new Date(job!.nextRunAt).getTime()
+    expect(retryAt).toBeGreaterThanOrEqual(before)
+    expect(retryAt).toBeLessThan(before + 30_000)
+    await patch(id, { enabled: false })
+  })
+
+  it("skips and records the tick when the device is offline, without counting it", async () => {
+    const t = await task("offline")
+    const { body } = await create({
+      taskId: t,
+      deviceSerial: "A",
+      intervalSeconds: 30,
+    })
+    const id = body.schedule.id as string
 
     devices = []
     await tick(id)
@@ -222,7 +250,6 @@ describe("schedules", () => {
 
     const runs = await runsFor(id)
     expect(runs.map((r) => [r.status, r.skipReason])).toEqual([
-      ["skipped", "device busy"],
       ["skipped", "device offline"],
     ])
     const s = await get(id)

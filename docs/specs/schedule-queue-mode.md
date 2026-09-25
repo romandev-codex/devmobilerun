@@ -59,9 +59,9 @@ Polling rather than reacting to device-free events is deliberate: a missed wake-
 A run cannot be preempted, so "interval wins" means the due interval schedule gets the next free slot. Two halves:
 
 - Dispatch stands down for a device with a due interval schedule (step 1 above).
-- A tick that finds its device busy **with a queue run** re-plans itself 10 seconds out and records nothing, instead of recording a `skipped` run and losing a whole interval. It is therefore still due when the device frees, and dispatch yields to it.
+- A tick that finds its device busy **with any run** (queue, interval or manual) re-plans itself 10 seconds out and records nothing, instead of recording a `skipped` run and losing a whole interval. While it waits, its `nextRunAt` stays at the moment it fell due, so dispatch yields to it and it takes the device as soon as the device is free.
 
-Interval-versus-interval collisions keep the original skip behavior. The cost is up to ~10 seconds of idle device between a queue run ending and the timed run starting.
+Only an offline device (or an unreachable executor) still records a skip. The cost is up to ~10 seconds of idle device between a queue run ending and the timed run starting.
 
 ## Run Bookkeeping
 

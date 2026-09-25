@@ -25,7 +25,7 @@ export type ScheduleTickData = { scheduleId: string }
 export const DEVICE_DISPATCH_JOB = "device-dispatch"
 /** How often idle devices are offered their next queued schedule. */
 export const DEVICE_DISPATCH_EVERY = "5 seconds"
-/** How long a tick blocked by a queue run waits before trying for the device again. */
+/** How long a tick blocked by a busy device waits before trying for it again. */
 const INTERVAL_RETRY_MS = 10_000
 
 export type ScheduleView = {
@@ -222,17 +222,22 @@ export async function cancelPendingTicks(
   await a.cancel(pending)
 }
 
-/** Replaces any pending tick with one at `when` and records it on the schedule. */
+/**
+ * Replaces any pending tick with one at `when` and records `dueAt` (by default
+ * `when`) on the schedule. A tick waiting on a busy device records the moment it
+ * fell due, so dispatch keeps treating it as due and leaves the device to it.
+ */
 export async function planNextTick(
   scheduleId: mongoose.Types.ObjectId,
-  when: Date
+  when: Date,
+  dueAt: Date = when
 ): Promise<void> {
   await cancelPendingTicks(scheduleId)
   const a = await agenda()
   await a.schedule<ScheduleTickData>(when, SCHEDULE_TICK_JOB, {
     scheduleId: scheduleId.toString(),
   })
-  await Schedule.updateOne({ _id: scheduleId }, { $set: { nextRunAt: when } })
+  await Schedule.updateOne({ _id: scheduleId }, { $set: { nextRunAt: dueAt } })
 }
 
 export async function pendingTickCount(
@@ -532,6 +537,7 @@ export async function executeScheduleTick(scheduleId: string): Promise<void> {
   let next: Date | null = new Date(
     Date.now() + (schedule.intervalSeconds ?? 0) * 1000
   )
+  let dueAt: Date | undefined
   try {
     let unavailable: string | null = null
     try {
@@ -544,16 +550,17 @@ export async function executeScheduleTick(scheduleId: string): Promise<void> {
     }).lean()
     if (!unavailable) {
       if (!device || !device.online) unavailable = "device offline"
-      else if (device.activeRunId) unavailable = "device busy"
+      else if (device.activeRunId) {
+        // Another run holds the device: take it as soon as that run frees it
+        // rather than losing a whole interval to a skip. Staying due keeps the
+        // queue rotation from claiming the device in between.
+        dueAt = new Date()
+        next = new Date(dueAt.getTime() + INTERVAL_RETRY_MS)
+        return
+      }
     }
 
     if (unavailable) {
-      // A queue run holds the device: wait for the slot it is about to free
-      // rather than losing a whole interval to a skip.
-      if (await blockedByQueueRun(schedule.deviceSerial)) {
-        next = new Date(Date.now() + INTERVAL_RETRY_MS)
-        return
-      }
       await createSkippedRun({
         taskId: schedule.taskId.toString(),
         deviceSerial: schedule.deviceSerial,
@@ -604,7 +611,7 @@ export async function executeScheduleTick(scheduleId: string): Promise<void> {
   } catch (err) {
     console.error(`[schedule-tick] ${scheduleId} failed`, err)
   } finally {
-    const plan = next ? planNextTick(oid, next) : ensureIntervalTick(oid)
+    const plan = next ? planNextTick(oid, next, dueAt) : ensureIntervalTick(oid)
     await plan.catch((err: unknown) =>
       console.error(
         `[schedule-tick] ${scheduleId} could not plan next tick`,
@@ -612,18 +619,6 @@ export async function executeScheduleTick(scheduleId: string): Promise<void> {
       )
     )
   }
-}
-
-/** Whether the run occupying a device belongs to a queue schedule. */
-async function blockedByQueueRun(serial: string): Promise<boolean> {
-  const active = await Run.findOne({ deviceSerial: serial, status: "running" })
-    .select("scheduleId")
-    .lean<{ scheduleId?: mongoose.Types.ObjectId | null }>()
-  if (!active?.scheduleId) return false
-  const s = await Schedule.findById(active.scheduleId)
-    .select("mode")
-    .lean<{ mode: ScheduleMode }>()
-  return s?.mode === "queue"
 }
 
 /**
