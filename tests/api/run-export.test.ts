@@ -78,6 +78,23 @@ async function runOnce() {
         ],
       },
     },
+    {
+      event: "llm_call",
+      data: {
+        startedAt: "2026-09-25T10:00:00.000+00:00",
+        method: "POST",
+        url: "https://openrouter.ai/api/v1/chat/completions",
+        status: 200,
+        durationMs: 812,
+        firstByteMs: 140,
+        requestHeaders: { authorization: "<redacted>" },
+        request: '{\n  "model": "m",\n  "messages": []\n}',
+        responseHeaders: { "content-type": "text/event-stream" },
+        stream: true,
+        assembled: '{\n  "content": "click(3)"\n}',
+        response: 'data: {"choices":[]}',
+      },
+    },
     { event: "thought", data: { text: "Tap login", code: "click(3)" } },
     {
       event: "action",
@@ -112,7 +129,7 @@ describe("run export", () => {
     expect(log).toContain(`Run ${runId} — Export me`)
     expect(log).toContain("Status: failed")
     expect(log).toContain("Instruction:\n  tap login")
-    expect(log).toContain("screenshot step 0 (stored)")
+    expect(log).toMatch(/screenshot step 0 \(stored as [0-9a-f]{24}\)/)
     expect(log).toContain("ui_state step 0 (2 elements)")
     expect(log).toContain(
       '3. FrameLayout: "android.widget.FrameLayout" - (0,900,1080,1200)'
@@ -125,6 +142,29 @@ describe("run export", () => {
     expect(log).toContain("Clicked on Text: 'android.widget.FrameLayout'")
     expect(log).toContain("result success=false steps=1: wrong tap")
     expect(log).not.toContain(PNG.toString("base64"))
+  })
+
+  it("includes every LLM request and response, which the timeline leaves out", async () => {
+    const runId = await runOnce()
+    const { GET } = await import("@/app/api/runs/[id]/export/route")
+    const log = await (
+      await GET(new Request("http://app/x"), {
+        params: Promise.resolve({ id: runId }),
+      })
+    ).text()
+    expect(log).toContain("of which 1 LLM calls")
+    expect(log).toContain(
+      "llm_call POST https://openrouter.ai/api/v1/chat/completions -> 200 (812 ms, first byte 140 ms) [stream]"
+    )
+    expect(log).toContain('request body:\n        {\n          "model": "m"')
+    expect(log).toContain(
+      'assembled response:\n        {\n          "content": "click(3)"'
+    )
+    expect(log).toContain('response body:\n        data: {"choices":[]}')
+
+    const { listRunEvents } = await import("@/lib/runs/service")
+    const timeline = await listRunEvents(runId)
+    expect(timeline.map((e) => e.type)).not.toContain("llm_call")
   })
 
   it("returns 404 for an unknown run", async () => {

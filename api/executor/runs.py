@@ -15,6 +15,7 @@ import time
 from dataclasses import dataclass, field
 from typing import AsyncIterator
 
+from . import llm_trace
 from .events import RunEvent
 from .framework import AgentRun, DeviceNotFound, Framework, RunSpec, end_phase_spec
 
@@ -160,6 +161,15 @@ class RunManager:
         run.task.cancel()
 
     async def _execute(self, run: ActiveRun) -> None:
+        def record_llm_call(call: dict) -> None:
+            # A call that settles after the run ended has no stream left to join.
+            if not run.done:
+                run.publish(RunEvent("llm_call", call))
+
+        with llm_trace.recording(record_llm_call):
+            await self._execute_traced(run)
+
+    async def _execute_traced(self, run: ActiveRun) -> None:
         spec = run.spec
         # Screenshot numbering carried across phases so the end step continues
         # the goal's steps instead of restarting at zero.

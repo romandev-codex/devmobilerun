@@ -210,14 +210,22 @@ export async function getRun(id: string): Promise<RunView> {
   return toRunView(doc)
 }
 
+/**
+ * Raw LLM request/response records. They can be megabytes per run, so only the
+ * export reads them; the timeline and its live stream leave them out.
+ */
+export const LLM_CALL_EVENT = "llm_call"
+
 export async function listRunEvents(
   runId: string,
-  afterSeq = -1
+  afterSeq = -1,
+  { withLlmCalls = false }: { withLlmCalls?: boolean } = {}
 ): Promise<RunEventView[]> {
   await connectDb()
   const docs = await RunEvent.find({
     runId: asObjectId(runId),
     seq: { $gt: afterSeq },
+    ...(withLlmCalls ? {} : { type: { $ne: LLM_CALL_EVENT } }),
   })
     .sort({ seq: 1 })
     .lean<RunEventDoc[]>()
@@ -335,6 +343,7 @@ export async function appendRunEvent(
       at,
       payload: event.payload,
     })
+    if (event.type === LLM_CALL_EVENT) return
     publishRunMessage({
       kind: "event",
       runId: runId.toString(),
