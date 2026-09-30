@@ -112,8 +112,9 @@ npm run check                   # typecheck + lint + both test suites
    persisted as it happens, so a run that fails halfway still leaves what it learned.
 5. The run page receives events pushed from the job over SSE. Stop cancels the agent on the executor; if the
    executor is unreachable the stop fails rather than pretending the phone stopped.
-6. Schedules re-plan the next tick from the end of each run, record a skipped run when the device is busy or
-   offline, and disable themselves at their max run count.
+6. Schedules re-plan the next tick from the end of each run, wait (retrying within seconds, without recording
+   anything) while the device is busy with another run or offline, and disable themselves at their max run count.
+   One device runs one task at a time: a run queued for a device counts as holding it.
 7. After a server restart, in-flight runs reattach to the executor's stream from the last stored event; a run is
    marked lost only when the executor no longer knows it. Scheduled runs finished this way still count toward
    their schedule.

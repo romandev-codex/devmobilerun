@@ -59,9 +59,10 @@ Polling rather than reacting to device-free events is deliberate: a missed wake-
 A run cannot be preempted, so "interval wins" means the due interval schedule gets the next free slot. Two halves:
 
 - Dispatch stands down for a device with a due interval schedule (step 1 above).
-- A tick that finds its device busy **with any run** (queue, interval or manual) re-plans itself 10 seconds out and records nothing, instead of recording a `skipped` run and losing a whole interval. While it waits, its `nextRunAt` stays at the moment it fell due, so dispatch yields to it and it takes the device as soon as the device is free.
+- A tick that finds its device busy **with any run** (queue, interval or manual; queued or running, since a queued run has not taken the device lock yet) re-plans itself 10 seconds out and records nothing, instead of recording a `skipped` run and losing a whole interval. While it waits, its `nextRunAt` stays at the moment it fell due, so dispatch yields to it and it takes the device as soon as the device is free. Losing the device race inside `createRun` waits the same way.
+- A tick that finds its device off the adb list waits the same way, looking again every 30 seconds, so an offline phone never fills the run history with "device offline" rows.
 
-Only an offline device (or an unreachable executor) still records a skip. The cost is up to ~10 seconds of idle device between a queue run ending and the timed run starting.
+Only an unreachable executor still records a skip. The cost is up to ~10 seconds of idle device between a queue run ending and the timed run starting.
 
 ## Run Bookkeeping
 
@@ -76,7 +77,7 @@ A run that never started because it lost the device lock is marked failed but is
 - Creating or enabling a queue schedule plans no job; disabling one cancels nothing.
 - Switching interval → queue cancels the pending tick and clears `nextRunAt`; queue → interval plans a tick immediately.
 - At boot, `reconcileSchedules` retires over-budget schedules in both modes and plans ticks only for interval ones. `startAgenda` (re-)registers the dispatch job, which is idempotent.
-- An offline device's queue schedules simply wait; no `skipped` runs are recorded, because there is no tick to skip. Interval schedules keep recording them.
+- An offline device's schedules of either mode simply wait; no `skipped` runs are recorded.
 - Queues on different devices are independent and run in parallel.
 
 ## UI

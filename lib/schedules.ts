@@ -17,7 +17,13 @@ import {
   type ScheduleMode,
 } from "@/lib/models/schedule"
 import { Task } from "@/lib/models/task"
-import { createRun, createSkippedRun } from "@/lib/runs/service"
+import {
+  createRun,
+  createSkippedRun,
+  deviceBusy,
+  isDeviceBusyError,
+  runInFlightOn,
+} from "@/lib/runs/service"
 import { taskDeviceUserSchema } from "@/lib/tasks"
 
 const asObjectId = (id: string, what = "Schedule") => toObjectId(id, what)
@@ -38,6 +44,8 @@ export const DEVICE_DISPATCH_JOB = "device-dispatch"
 export const DEVICE_DISPATCH_EVERY = "5 seconds"
 /** How long a tick blocked by a busy device waits before trying for it again. */
 const INTERVAL_RETRY_MS = 10_000
+/** How long a tick whose device is off the adb list waits before looking again. */
+const OFFLINE_RETRY_MS = 30_000
 
 export type ScheduleView = {
   id: string
@@ -432,15 +440,6 @@ export async function runScheduleNow(id: string): Promise<{ runId: string }> {
 
 // ── device dispatch (queue mode) ────────────────────────────────────────
 
-/** True while a run already holds this device, or is about to. */
-async function deviceIsSpokenFor(serial: string): Promise<boolean> {
-  const pending = await Run.countDocuments({
-    deviceSerial: serial,
-    status: { $in: ["queued", "running"] },
-  })
-  return pending > 0
-}
-
 /**
  * Starts the next queue schedule on one idle device. A device with an interval
  * schedule already due is left alone: that tick is about to claim it, and a due
@@ -454,7 +453,7 @@ export async function dispatchDevice(serial: string): Promise<boolean> {
     nextRunAt: { $ne: null, $lte: new Date() },
   })
   if (due > 0) return false
-  if (await deviceIsSpokenFor(serial)) return false
+  if (await deviceBusy(serial)) return false
   if (await deviceCooldownUntil(serial)) return false // too hot; try again later
 
   // Least recently run first, so the device cycles its queue; `order` decides
@@ -542,10 +541,12 @@ export async function dispatchDevices(): Promise<number> {
 // ── tick ────────────────────────────────────────────────────────────────
 
 /**
- * One firing of an interval schedule. Skips (and records) when the device is
- * unavailable, otherwise runs the task inline; the run's own bookkeeping counts
- * it and plans the next tick. Disables the schedule when `maxRuns` is reached or
- * it has failed `maxFails` times in a row.
+ * One firing of an interval schedule. Waits (staying due, retrying within
+ * seconds) while the device is busy with another run or off the adb list;
+ * skips and records the tick only when the executor cannot be reached.
+ * Otherwise runs the task inline; the run's own bookkeeping counts it and plans
+ * the next tick. Disables the schedule when `maxRuns` is reached or it has
+ * failed `maxFails` times in a row.
  */
 export async function executeScheduleTick(scheduleId: string): Promise<void> {
   await connectDb()
@@ -565,6 +566,12 @@ export async function executeScheduleTick(scheduleId: string): Promise<void> {
     Date.now() + (schedule.intervalSeconds ?? 0) * 1000
   )
   let dueAt: Date | undefined
+  // Keeps the schedule due (so the queue rotation leaves the device to it) and
+  // tries again shortly, instead of losing the interval to a skip.
+  const waitFor = (ms: number) => {
+    dueAt = new Date()
+    next = new Date(dueAt.getTime() + ms)
+  }
   try {
     // Paused: skip this firing quietly and come back next interval, so the
     // schedule resumes on its own once SCHEDULE_ACTIVE is lifted.
@@ -578,19 +585,18 @@ export async function executeScheduleTick(scheduleId: string): Promise<void> {
     const device = await Device.findOne({
       serial: schedule.deviceSerial,
     }).lean()
-    if (device?.activeRunId) {
-      // Another run holds the device: take it as soon as that run frees it
-      // rather than losing a whole interval to a skip. Staying due keeps the
-      // queue rotation from claiming the device in between. This comes before
-      // the online check on purpose: a busy phone can drop off the adb list
-      // for a moment (profile switch, reconnect) and must not be skipped as
-      // offline while its run is still going.
-      dueAt = new Date()
-      next = new Date(dueAt.getTime() + INTERVAL_RETRY_MS)
+    if (
+      device?.activeRunId ||
+      (await runInFlightOn(schedule.deviceSerial))
+    ) {
+      // Another run holds the device, or is queued to: one device runs one
+      // task at a time, so take it as soon as that run frees it. This comes
+      // before the online check on purpose: a busy phone can drop off the adb
+      // list for a moment (profile switch, reconnect) and must not be treated
+      // as offline while its run is still going.
+      waitFor(INTERVAL_RETRY_MS)
       return
     }
-    if (!unavailable && (!device || !device.online))
-      unavailable = "device offline"
 
     if (unavailable) {
       await createSkippedRun({
@@ -599,6 +605,13 @@ export async function executeScheduleTick(scheduleId: string): Promise<void> {
         scheduleId,
         reason: unavailable,
       })
+      return
+    }
+    if (!device || !device.online) {
+      // Off the adb list: nothing to skip over, the task simply has not had its
+      // turn yet. Keep looking until the phone is back rather than filling the
+      // run history with "device offline" rows.
+      waitFor(OFFLINE_RETRY_MS)
       return
     }
 
@@ -620,7 +633,13 @@ export async function executeScheduleTick(scheduleId: string): Promise<void> {
         scheduleId,
       })
     } catch (err) {
-      // Lost the race for the device (or the task vanished): record a skip, keep the schedule alive.
+      // Lost the race for the device: another run got there between the checks
+      // above and now, so wait for it like any other busy device.
+      if (isDeviceBusyError(err)) {
+        waitFor(INTERVAL_RETRY_MS)
+        return
+      }
+      // Anything else (the task vanished, its channel ran dry): record a skip, keep the schedule alive.
       await createSkippedRun({
         taskId: schedule.taskId.toString(),
         deviceSerial: schedule.deviceSerial,

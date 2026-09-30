@@ -41,7 +41,13 @@ describe("reconcileOnBoot", () => {
     const { Run } = await import("@/lib/models/run")
     const { Device } = await import("@/lib/models/device")
     const jobs = mongoose.connection.db!.collection("agendaJobs")
+    // One device runs one task at a time, so each run is created with the
+    // earlier ones parked; the statuses the scenario needs are set afterwards.
     const start = async () => {
+      await Run.updateMany(
+        { status: { $in: ["queued", "running"] } },
+        { $set: { status: "cancelled" } }
+      )
       await Device.updateOne(
         { serial: "emulator-5554" },
         { $set: { activeRunId: null } }
@@ -57,8 +63,10 @@ describe("reconcileOnBoot", () => {
       return (await r.json()).run.id as string
     }
 
-    // A run whose job was locked by the dead process.
     const withJob = await start()
+    const inline = await start()
+    const queued = await start()
+    // A run whose job was locked by the dead process.
     await Run.updateOne(
       { _id: withJob },
       { $set: { status: "running", startedAt: new Date() } }
@@ -68,14 +76,13 @@ describe("reconcileOnBoot", () => {
       { $set: { lockedAt: new Date(), nextRunAt: null } }
     )
     // A run started inline by a schedule tick: no run-task job of its own.
-    const inline = await start()
     await Run.updateOne(
       { _id: inline },
       { $set: { status: "running", startedAt: new Date() } }
     )
     await jobs.deleteMany({ "data.runId": inline })
     // A queued run keeps its pending job (re-armed); a lock it holds is stale and freed.
-    const queued = await start()
+    await Run.updateOne({ _id: queued }, { $set: { status: "queued" } })
     await Device.updateOne(
       { serial: "emulator-5554" },
       { $set: { activeRunId: new mongoose.Types.ObjectId(queued) } }

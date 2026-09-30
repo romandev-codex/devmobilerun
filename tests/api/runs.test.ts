@@ -277,11 +277,17 @@ describe("executeRun", () => {
   it("lets Run now pick a profile for the run, or keep the phone's active one", async () => {
     await syncDevices()
     const task = await createTask({ deviceUser: "Work" })
+    const { Run } = await import("@/lib/models/run")
+    // One device runs one task at a time: clear each run before the next.
+    const park = (id: string) =>
+      Run.updateOne({ _id: id }, { $set: { status: "cancelled" } })
     const chosen = await runNow(task.id, "emulator-5554", { deviceUser: "QA" })
     expect(chosen.status).toBe(201)
     expect(chosen.body.run.deviceUser).toBe("QA")
+    await park(chosen.body.run.id)
     const kept = await runNow(task.id, "emulator-5554", { deviceUser: null })
     expect(kept.body.run.deviceUser).toBeNull()
+    await park(kept.body.run.id)
     const cleared = await runNow(task.id, "emulator-5554", { deviceUser: "" })
     expect(cleared.body.run.deviceUser).toBeNull()
   })

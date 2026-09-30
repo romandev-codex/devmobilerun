@@ -306,27 +306,78 @@ describe("schedules", () => {
     await patch(id, { enabled: false })
   })
 
-  it("skips and records the tick when the device is offline, without counting it", async () => {
+  it("waits for an offline device without recording a skip", async () => {
     const t = await task("offline")
     const { body } = await create({
       taskId: t,
       deviceSerial: "A",
-      intervalSeconds: 30,
+      intervalSeconds: 3600,
     })
     const id = body.schedule.id as string
 
     devices = []
-    await tick(id)
-    devices = [...ONLINE]
+    const before = Date.now()
+    try {
+      await tick(id)
+    } finally {
+      devices = [...ONLINE]
+    }
 
-    const runs = await runsFor(id)
-    expect(runs.map((r) => [r.status, r.skipReason])).toEqual([
-      ["skipped", "device offline"],
-    ])
+    // No "device offline" row in the history; the schedule stays due and
+    // looks again within a minute rather than an hour later.
+    expect(await runsFor(id)).toHaveLength(0)
     const s = await get(id)
     expect(s.runCount).toBe(0)
     expect(s.enabled).toBe(true)
+    expect(new Date(s.nextRunAt).getTime()).toBeLessThanOrEqual(Date.now())
+    const job = await mongoose.connection
+      .db!.collection("agendaJobs")
+      .findOne({ name: "schedule-tick", "data.scheduleId": id })
+    const retryAt = new Date(job!.nextRunAt).getTime()
+    expect(retryAt).toBeGreaterThanOrEqual(before)
+    expect(retryAt).toBeLessThan(before + 60_000)
+
+    // Back on the adb list: the pending tick runs it.
+    await tick(id)
+    expect((await runsFor(id)).map((r) => r.status)).toEqual(["succeeded"])
+    await patch(id, { enabled: false })
+  })
+
+  it("waits while another run is still queued for the device, and refuses a second one", async () => {
+    const t = await task("queued-ahead")
+    const { body } = await create({
+      taskId: t,
+      deviceSerial: "A",
+      intervalSeconds: 3600,
+    })
+    const id = body.schedule.id as string
+    const { createRun } = await import("@/lib/runs/service")
+    const { Run } = await import("@/lib/models/run")
+    // A manual run created but not yet picked up by its job: the device lock
+    // is still free, but the device is spoken for.
+    const ahead = await createRun({
+      taskId: t,
+      deviceSerial: "A",
+      trigger: "manual",
+    })
+    try {
+      await expect(
+        createRun({ taskId: t, deviceSerial: "A", trigger: "manual" })
+      ).rejects.toThrow(/busy/)
+      await tick(id)
+    } finally {
+      await Run.updateOne(
+        { _id: new mongoose.Types.ObjectId(ahead.id) },
+        { $set: { status: "cancelled", finishedAt: new Date() } }
+      )
+    }
+
+    expect(await runsFor(id)).toHaveLength(0)
+    const s = await get(id)
+    expect(s.runCount).toBe(0)
+    expect(new Date(s.nextRunAt).getTime()).toBeLessThanOrEqual(Date.now())
     expect(await pendingTicks(id)).toBe(1)
+    await patch(id, { enabled: false })
   })
 
   it("disables itself when maxRuns is reached", async () => {
@@ -546,20 +597,21 @@ describe("schedules", () => {
     ).toBe(0)
   })
 
-  it("keeps ticking when run creation loses the device race", async () => {
+  it("waits, not skips, when run creation loses the device race", async () => {
     const t = await task("race")
     const { body } = await create({
       taskId: t,
       deviceSerial: "A",
-      intervalSeconds: 20,
+      intervalSeconds: 3600,
     })
     const id = body.schedule.id as string
     const { createRun } = await import("@/lib/runs/service")
+    const { conflict } = await import("@/lib/api/errors")
     const service = await import("@/lib/runs/service")
     const original = service.createRun
     Object.defineProperty(service, "createRun", {
       value: async () => {
-        throw new Error("Device A is busy with another run")
+        throw conflict("Device A is busy with another run")
       },
       configurable: true,
     })
@@ -572,9 +624,42 @@ describe("schedules", () => {
       })
     }
     void createRun
+    expect(await runsFor(id)).toHaveLength(0)
+    const s = await get(id)
+    expect(s.enabled).toBe(true)
+    expect(new Date(s.nextRunAt).getTime()).toBeLessThanOrEqual(Date.now())
+    expect(await pendingTicks(id)).toBe(1)
+    await patch(id, { enabled: false })
+  })
+
+  it("still records a skip when the task cannot start for another reason", async () => {
+    const t = await task("race-other")
+    const { body } = await create({
+      taskId: t,
+      deviceSerial: "A",
+      intervalSeconds: 20,
+    })
+    const id = body.schedule.id as string
+    const { conflict } = await import("@/lib/api/errors")
+    const service = await import("@/lib/runs/service")
+    const original = service.createRun
+    Object.defineProperty(service, "createRun", {
+      value: async () => {
+        throw conflict("Channel leads has no pending records")
+      },
+      configurable: true,
+    })
+    try {
+      await tick(id)
+    } finally {
+      Object.defineProperty(service, "createRun", {
+        value: original,
+        configurable: true,
+      })
+    }
     const runs = await runsFor(id)
     expect(runs.map((r) => r.status)).toEqual(["skipped"])
-    expect(String(runs[0].skipReason)).toContain("busy")
+    expect(String(runs[0].skipReason)).toContain("no pending records")
     expect(await pendingTicks(id)).toBe(1)
   })
 

@@ -2,7 +2,7 @@ import mongoose from "mongoose"
 import { z } from "zod"
 
 import { type TaskOptions, toTaskOptions } from "@/lib/agents"
-import { conflict, notFound } from "@/lib/api/errors"
+import { ApiError, conflict, notFound } from "@/lib/api/errors"
 import { asObjectId as toObjectId, connectDb } from "@/lib/db"
 import { claimNextRecord, undoRecord } from "@/lib/db-channels"
 import { Device } from "@/lib/models/device"
@@ -136,9 +136,42 @@ export const runNowSchema = z.object({
   deviceUser: taskDeviceUserSchema.optional(),
 })
 
+const BUSY_SUFFIX = "is busy with another run"
+
+/** The refusal `createRun` raises for a device that already has a run. */
+export function isDeviceBusyError(err: unknown): boolean {
+  return (
+    err instanceof ApiError &&
+    err.code === "conflict" &&
+    err.message.endsWith(BUSY_SUFFIX)
+  )
+}
+
+/**
+ * True while a run of this device is queued or running. A queued run has not
+ * taken the device lock yet, so the lock alone would let a second run in.
+ */
+export async function runInFlightOn(serial: string): Promise<boolean> {
+  const pending = await Run.countDocuments({
+    deviceSerial: serial,
+    status: { $in: ["queued", "running"] },
+  })
+  return pending > 0
+}
+
+/** True while a run holds this device, or is queued to take it. */
+export async function deviceBusy(serial: string): Promise<boolean> {
+  const device = await Device.findOne({ serial })
+    .select("activeRunId")
+    .lean<{ activeRunId?: mongoose.Types.ObjectId | null }>()
+  if (device?.activeRunId) return true
+  return runInFlightOn(serial)
+}
+
 /**
  * Creates a queued run for a task on a device. Refuses when the device is
- * unknown, offline or already running something. Enqueueing is the caller's job.
+ * unknown, offline or already has a run queued or running: one device runs one
+ * task at a time. Enqueueing is the caller's job.
  */
 export async function createRun(input: {
   taskId: string
@@ -153,8 +186,8 @@ export async function createRun(input: {
   const device = await Device.findOne({ serial: input.deviceSerial }).lean()
   if (!device) throw notFound("Device")
   if (!device.online) throw conflict(`Device ${input.deviceSerial} is offline`)
-  if (device.activeRunId)
-    throw conflict(`Device ${input.deviceSerial} is busy with another run`)
+  if (device.activeRunId || (await runInFlightOn(input.deviceSerial)))
+    throw conflict(`Device ${input.deviceSerial} ${BUSY_SUFFIX}`)
 
   const fields = runFields(task, input.deviceSerial, input.scheduleId ?? null)
   if (input.deviceUser !== undefined) fields.deviceUser = input.deviceUser
