@@ -247,6 +247,13 @@ class Framework(Protocol):
 class MobilerunFramework:
     """Real adapter. Imports the framework lazily so importing the executor stays cheap."""
 
+    def __init__(self) -> None:
+        # The framework's Portal client addresses user 0; route it to the
+        # profile in the foreground instead (see multiuser.py).
+        from . import multiuser
+
+        multiuser.install()
+
     def version(self) -> str:
         from importlib.metadata import PackageNotFoundError, version
 
@@ -362,6 +369,9 @@ class MobilerunFramework:
         """
         import asyncio
 
+        from . import multiuser
+
+        multiuser.forget(serial)
         output = await self._shell(serial, ["am", "switch-user", "-w", str(user_id)])
         if _unknown_option(output):
             output = await self._shell(serial, ["am", "switch-user", str(user_id)])
@@ -370,6 +380,7 @@ class MobilerunFramework:
         deadline = asyncio.get_running_loop().time() + SWITCH_USER_TIMEOUT_SECONDS
         while True:
             if await self._current_user(serial) == user_id and await self._user_unlocked(serial, user_id):
+                multiuser.note_current_user(serial, user_id)
                 await asyncio.sleep(SWITCH_USER_SETTLE_SECONDS)
                 return
             if asyncio.get_running_loop().time() >= deadline:
