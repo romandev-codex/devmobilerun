@@ -175,6 +175,12 @@ class RunManager:
         # the goal's steps instead of restarting at zero.
         progress = [0]
         try:
+            # Every agent starts from an awake device on its home screen; a failed press is not fatal.
+            try:
+                await self._framework.wake(spec.device_serial)
+            except Exception as exc:  # noqa: BLE001 - the run may still work on an awake screen
+                logger.warning("run %s: HOME press failed: %s", spec.run_id, exc)
+                run.publish(RunEvent("log", {"message": f"HOME press to wake the device failed: {exc}"}))
             if spec.start_url:
                 await self._framework.open_url(spec.device_serial, spec.start_url)
                 run.publish(RunEvent("log", {"message": f"Opened {spec.start_url}"}))

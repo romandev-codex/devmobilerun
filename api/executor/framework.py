@@ -115,6 +115,8 @@ class Framework(Protocol):
 
     async def open_url(self, serial: str, url: str) -> None: ...
 
+    async def wake(self, serial: str) -> None: ...
+
     def create_run(self, spec: RunSpec) -> AgentRun: ...
 
 
@@ -204,6 +206,13 @@ class MobilerunFramework:
 
         device = await adb.device(serial=serial)
         await device.shell(["am", "start", "-a", "android.intent.action.VIEW", "-d", url])
+
+    async def wake(self, serial: str) -> None:
+        """Presses HOME: turns a sleeping screen on and leaves the device on the home screen."""
+        from async_adbutils import adb
+
+        device = await adb.device(serial=serial)
+        await device.shell(["input", "keyevent", "KEYCODE_HOME"])
 
     def create_run(self, spec: RunSpec) -> AgentRun:
         if spec.agent == "jev":

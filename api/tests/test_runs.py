@@ -43,12 +43,25 @@ async def test_start_run_streams_events_and_ends_after_result(client, framework)
     assert events[0].data["message"] == "Opened https://example.com"
     assert events[-1].data == {"success": True, "reason": "Done", "steps": 2}
 
+    assert framework.woken == ["emulator-5554"]  # HOME pressed once, before the URL
     assert framework.opened_urls == [("emulator-5554", "https://example.com")]
     spec = framework.specs[0]
     assert spec.instruction.startswith("Open settings")
     assert (spec.vision, spec.reasoning, spec.max_steps) == (True, False, 7)
     assert spec.variables == {"account": "work"}
     assert spec.memory == {"last_id": "42"}
+
+
+async def test_a_failed_wake_is_logged_and_the_run_goes_on(client, framework):
+    async def broken_wake(serial: str) -> None:
+        raise RuntimeError("adb gone")
+
+    framework.wake = broken_wake
+    await client.post("/runs", json=start_body(run_id="run-wake"))
+    events = await collect_events(client, "run-wake")
+    assert events[0].event == "log"
+    assert events[0].data["message"] == "HOME press to wake the device failed: adb gone"
+    assert [e.event for e in events][1:] == ["started", "thought", "action", "result"]
 
 
 async def test_run_without_start_url_does_not_open_anything(client, framework):

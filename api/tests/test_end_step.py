@@ -61,6 +61,8 @@ async def test_end_step_runs_after_a_goal_that_succeeded_or_failed(client, frame
     goal, end = framework.specs
     assert goal.instruction.startswith("Open settings")
     assert "Close the app" in end.instruction
+    # HOME is pressed before the goal only: the end step works on the screen the goal left.
+    assert framework.woken == ["emulator-5554"]
 
 
 async def test_a_run_without_an_end_step_still_runs_once(client, framework):

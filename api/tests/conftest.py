@@ -27,6 +27,7 @@ class FakeFramework:
             DeviceInfo(serial="ZY22ABCD", state="unauthorized", model=None),
         ]
         self.opened_urls: list[tuple[str, str]] = []
+        self.woken: list[str] = []
         # Battery temperature per serial (°C); None means the device has no usable sensor.
         self.temperatures: dict[str, float | None] = {"emulator-5554": 31.2}
         self.specs: list[RunSpec] = []
@@ -62,6 +63,9 @@ class FakeFramework:
 
     async def open_url(self, serial: str, url: str) -> None:
         self.opened_urls.append((serial, url))
+
+    async def wake(self, serial: str) -> None:
+        self.woken.append(serial)
 
     def create_run(self, spec: RunSpec) -> "FakeAgentRun":
         self.specs.append(spec)

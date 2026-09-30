@@ -166,12 +166,7 @@ async def run_session(driver: FakeDriver, jev: ScriptedJev, advisor=None, **spec
         advisor=advisor,
         sleep=_no_sleep,
     )
-    events = [e async for e in agent.events()]
-    # Every model-driven session opens with the wake-up HOME press; tests assert the actions after it.
-    if any(e.type == "log" and e.payload["message"] == "Pressed HOME to wake the device" for e in events):
-        assert driver.actions[:1] == [("button", "home")]
-        del driver.actions[0]
-    return events
+    return [e async for e in agent.events()]
 
 
 async def _no_sleep(_: float) -> None:
@@ -333,7 +328,7 @@ async def test_session_taps_then_reports_done():
     assert driver.actions == [("tap", 270, 200)]
     types = [e.type for e in events]
     assert types == [
-        "log", "log",
+        "log",
         "screenshot", "ui_state", "thought", "action",
         "screenshot", "ui_state", "thought", "result",
     ]  # fmt: skip
@@ -348,26 +343,6 @@ async def test_session_taps_then_reports_done():
     assert events[-1].payload["success"] is True
     assert events[-1].payload["steps"] == 1
     assert "not independently verified" in events[-1].payload["reason"]
-
-
-async def test_session_presses_home_to_wake_the_device_before_asking_jev():
-    def go_home(driver: FakeDriver, action: tuple) -> None:
-        if action == ("button", "home"):
-            driver.state = LAUNCHER
-
-    driver = FakeDriver(SETTINGS, go_home)
-    jev = ScriptedJev([("DONE", None)])
-    agent = JevAgentRun(
-        spec(),
-        config=JevConfig(api_key="k", model="jev-latest"),
-        device=JevDevice(driver, SERIAL),
-        transport=jev,
-        sleep=_no_sleep,
-    )
-    events = [e async for e in agent.events()]
-    assert driver.actions == [("button", "home")]
-    assert jev.bodies[0]["state"]["app"] == LAUNCHER["phone_state"]["packageName"]  # Jev saw the launcher
-    assert any(e.type == "log" and e.payload["message"] == "Pressed HOME to wake the device" for e in events)
 
 
 async def test_session_reports_each_app_card_once_when_its_app_is_on_screen():
@@ -415,7 +390,7 @@ async def test_session_never_taps_a_target_that_changed_and_decides_again():
         sleep=_no_sleep,
     )
     events = [e async for e in agent.events()]
-    assert driver.actions == [("button", "home")]  # only the wake-up press
+    assert driver.actions == []
     assert any(e.type == "log" and "Screen changed" in e.payload["message"] for e in events)
     assert events[-1].type == "result" and events[-1].payload["success"] is False
 
