@@ -152,3 +152,29 @@ def test_parse_created_user_id_reads_the_new_id_or_raises():
     assert parse_created_user_id("Success: created user id 12\n") == 12
     with pytest.raises(DeviceUserError, match="couldn't create"):
         parse_created_user_id("Error: couldn't create User.\n")
+
+
+async def test_create_user_falls_back_to_a_guest_user_when_refused():
+    from executor.framework import DeviceUser, DeviceUserError, MobilerunFramework
+
+    calls: list[list[str]] = []
+    replies = iter(["Error: couldn't create User.", "Success: created user id 12"])
+
+    async def fake_shell(serial: str, args: list[str]) -> str:
+        calls.append(args)
+        return next(replies)
+
+    framework = MobilerunFramework()
+    framework._shell = fake_shell  # type: ignore[method-assign]
+    user = await framework.create_user("emulator-5554", "Tester")
+    assert user == DeviceUser(id=12, name="Tester", running=False, current=False)
+    assert calls == [
+        ["pm", "create-user", "Tester"],
+        ["pm", "create-user", "--guest", "Tester"],
+    ]
+
+    replies = iter(["Error: couldn't create User.", "Error: guest refused too"])
+    calls.clear()
+    with pytest.raises(DeviceUserError, match="couldn't create User.; as guest: Error: guest refused too"):
+        await framework.create_user("emulator-5554", "Tester")
+    assert len(calls) == 2

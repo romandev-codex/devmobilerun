@@ -277,8 +277,18 @@ class MobilerunFramework:
         return parse_user_list(output, await self._current_user(serial))
 
     async def create_user(self, serial: str, name: str) -> DeviceUser:
+        """Creates a full user; when the device refuses (user limit, restricted
+        profiles), a guest user of the same name is created instead."""
         output = await self._shell(serial, ["pm", "create-user", name])
-        return DeviceUser(id=parse_created_user_id(output), name=name, running=False, current=False)
+        try:
+            user_id = parse_created_user_id(output)
+        except DeviceUserError as first:
+            output = await self._shell(serial, ["pm", "create-user", "--guest", name])
+            try:
+                user_id = parse_created_user_id(output)
+            except DeviceUserError as second:
+                raise DeviceUserError(f"{first}; as guest: {second}") from None
+        return DeviceUser(id=user_id, name=name, running=False, current=False)
 
     async def switch_user(self, serial: str, user_id: int) -> None:
         """Brings the user to the foreground and waits until the device reports it."""
