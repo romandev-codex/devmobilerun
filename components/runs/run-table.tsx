@@ -35,6 +35,7 @@ export function RunTable({
           <TableHead>Status</TableHead>
           {showTask ? <TableHead>Task</TableHead> : null}
           {showDevice ? <TableHead>Device</TableHead> : null}
+          <TableHead>Profile</TableHead>
           <TableHead>Trigger</TableHead>
           <TableHead>Started</TableHead>
           <TableHead>Duration</TableHead>
@@ -69,6 +70,11 @@ export function RunTable({
                 </Link>
               </TableCell>
             ) : null}
+            <TableCell className="text-xs">
+              {r.deviceUser ?? (
+                <span className="text-muted-foreground">active</span>
+              )}
+            </TableCell>
             <TableCell className="text-xs text-muted-foreground">
               {r.trigger}
             </TableCell>
