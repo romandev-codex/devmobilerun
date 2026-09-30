@@ -45,6 +45,7 @@ services:
       TYPESAFE_MODEL: ${TYPESAFE_MODEL:-jev-latest}
       # https://openrouter.ai/api to call Jev through OpenRouter with OPENROUTER_API_KEY.
       TYPESAFE_BASE_URL: ${TYPESAFE_BASE_URL:-}
+      SCHEDULE_ACTIVE: ${SCHEDULE_ACTIVE:-true}
       # --- Option B: host adb server (macOS / Windows / Linux) ---------------
       # The executor (async_adbutils) reads the first two; the `adb` CLI inside
       # the container (`docker exec mobilerun adb devices`) reads the third.
