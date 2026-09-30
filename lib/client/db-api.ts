@@ -5,6 +5,8 @@ import { apiFetch, type ApiResult } from "@/lib/client/api"
  * that a server component read from `DB_API_TOKEN` and handed down.
  */
 export type DbApi = {
+  /** Plain fetch with the token attached; for non-JSON responses such as downloads. */
+  raw: (input: string, init?: RequestInit) => Promise<Response>
   fetch: <T = unknown>(
     input: string,
     init?: RequestInit
@@ -24,6 +26,7 @@ export function dbApi(token: string | null): DbApi {
     return { ...init, headers }
   }
   return {
+    raw: (input, init) => fetch(input, withAuth(init)),
     fetch: (input, init) => apiFetch(input, withAuth(init)),
     json: (input, method, payload) =>
       apiFetch(input, withAuth({ method, body: JSON.stringify(payload) })),

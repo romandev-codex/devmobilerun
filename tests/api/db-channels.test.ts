@@ -119,6 +119,27 @@ async function bulk(name: string, payload: unknown) {
   return { status: res.status, body: await res.json() } as Res
 }
 
+async function exportRecords(
+  name: string,
+  query: Record<string, string> = {},
+  headers?: HeadersInit
+) {
+  const { GET } =
+    await import("@/app/api/db/channels/[name]/records/export/route")
+  const qs = new URLSearchParams(query).toString()
+  const res = await GET(
+    new Request(`http://app/api/db/channels/${name}/records/export?${qs}`, {
+      headers,
+    }),
+    { params: Promise.resolve({ name }) }
+  )
+  return {
+    status: res.status,
+    headers: res.headers,
+    text: await res.text(),
+  }
+}
+
 describe("db channels", () => {
   it("creates a channel, lists it with zero counts and reads it back", async () => {
     const created = await createChannel({
@@ -378,6 +399,83 @@ describe("db records (operator API)", () => {
     expect((await listRecords("clear-12b")).body.total).toBe(1)
     expect((await bulk("missing-12", { action: "clear" })).status).toBe(404)
   })
+
+  it("exports a channel as a JSON array in queue order", async () => {
+    await createChannel({ name: "export-15" })
+    const { body } = await add("export-15", [{ n: 1 }, { n: 2 }])
+    await add("export-15", [{ n: 3 }])
+    await record("PATCH", "export-15", body.records[0].id, { status: "done" })
+
+    const res = await exportRecords("export-15")
+    expect(res.status).toBe(200)
+    expect(res.headers.get("content-type")).toContain("application/json")
+    expect(res.headers.get("content-disposition")).toBe(
+      'attachment; filename="export-15.json"'
+    )
+    const records = JSON.parse(res.text)
+    expect(records.map((r: { data: { n: number } }) => r.data.n)).toEqual([
+      1, 2, 3,
+    ])
+    expect(records[0]).toMatchObject({
+      id: body.records[0].id,
+      channel: "export-15",
+      status: "done",
+      result: null,
+    })
+
+    const empty = await exportRecords("export-15", { status: "failed" })
+    expect(empty.status).toBe(200)
+    expect(JSON.parse(empty.text)).toEqual([])
+  })
+
+  it("exports data only, filtered by status, as JSON or NDJSON", async () => {
+    await createChannel({ name: "export-16" })
+    const { body } = await add("export-16", [{ n: 1 }, { n: 2 }, { n: 3 }])
+    await record("PATCH", "export-16", body.records[1].id, { status: "failed" })
+
+    const data = await exportRecords("export-16", {
+      shape: "data",
+      status: "pending",
+    })
+    expect(data.headers.get("content-disposition")).toBe(
+      'attachment; filename="export-16-pending-data.json"'
+    )
+    expect(JSON.parse(data.text)).toEqual([{ n: 1 }, { n: 3 }])
+    // The data-only export round-trips through import unchanged.
+    const imported = await importRecords("export-16", JSON.parse(data.text))
+    expect(imported.status).toBe(201)
+    expect(imported.body.records.map((r: { data: unknown }) => r.data)).toEqual(
+      [{ n: 1 }, { n: 3 }]
+    )
+
+    const ndjson = await exportRecords("export-16", {
+      format: "ndjson",
+      shape: "data",
+    })
+    expect(ndjson.headers.get("content-type")).toContain("application/x-ndjson")
+    expect(ndjson.headers.get("content-disposition")).toBe(
+      'attachment; filename="export-16-data.ndjson"'
+    )
+    const lines = ndjson.text
+      .trimEnd()
+      .split("\n")
+      .map((l) => JSON.parse(l))
+    expect(lines).toEqual([{ n: 1 }, { n: 2 }, { n: 3 }, { n: 1 }, { n: 3 }])
+  })
+
+  it("rejects an unknown channel or a bad export query before streaming", async () => {
+    const missing = await exportRecords("missing-17")
+    expect(missing.status).toBe(404)
+    expect(JSON.parse(missing.text).error.code).toBe("not_found")
+
+    await createChannel({ name: "export-17" })
+    const bad = await exportRecords("export-17", { status: "weird" })
+    expect(bad.status).toBe(400)
+    expect(JSON.parse(bad.text).error.code).toBe("validation_error")
+    expect((await exportRecords("export-17", { format: "csv" })).status).toBe(
+      400
+    )
+  })
 })
 
 describe("db api bearer token", () => {
@@ -402,6 +500,11 @@ describe("db api bearer token", () => {
     expect((await get("auth-13")).status).toBe(401)
     expect(
       (await get("auth-13", { authorization: "Bearer s3cret" })).status
+    ).toBe(200)
+    expect((await exportRecords("auth-13")).status).toBe(401)
+    expect(
+      (await exportRecords("auth-13", {}, { authorization: "Bearer s3cret" }))
+        .status
     ).toBe(200)
     expect(
       (

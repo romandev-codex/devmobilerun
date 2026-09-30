@@ -56,29 +56,30 @@ A **DB channels** module: a simple queue-style store on top of MongoDB.
 22. As an operator, I want to delete all records with a given status in one action, so that I can purge finished work.
 23. As an operator, I want to clear a whole channel in one action with a confirmation, so that I can reuse it for a new batch.
 24. As an operator, I want to add a single record by hand from the channel page, so that I can test a worker without preparing a file.
+25. As an operator, I want to export a channel's records, or only those with one status, as a JSON or NDJSON file, so that I can hand results to another system or re-import failed rows into a fresh channel.
 
 ### Worker API
 
-25. As a worker, I want to call **get** on a channel and receive the oldest `pending` record, so that work is processed first-in first-out.
-26. As a worker, I want **get** to atomically mark the record as `processing`, so that a second worker calling at the same instant receives a different record or nothing.
-27. As a worker, I want **get** on an empty channel to return an explicit empty result with a success status rather than an error, so that polling loops do not need to treat "no work" as a failure.
-28. As a worker, I want **get** to work with either GET or POST, so that a tool that can only issue GETs still works.
-29. As a worker, I want to call **add** with one object or an array of objects, so that I can push new work, including follow-up work discovered while processing.
-30. As a worker, I want **set** on a record id to update its status and attach a free-form result object, so that I can mark work done or failed and hand back output.
-31. As a worker, I want **undo** on a record id to return a `processing` record to `pending`, so that an item I could not finish is retried by the next worker.
-32. As a worker, I want the record's own id in every response, so that I can call set or undo later.
-33. As a worker, I want the same `{ error: { code, message } }` error envelope the rest of the API uses, so that one error handler works everywhere.
-34. As a worker, I want a `not_found` error when the channel slug does not exist, so that a typo is obvious rather than silently creating a channel.
-35. As a worker, I want a `conflict` error when I try to undo a record that is not `processing`, so that I cannot accidentally reopen a finished record.
-36. As a worker, I want to authenticate with a bearer token when the operator has configured one, so that the queue can be reached from outside a trusted network.
-37. As an operator, I want the worker API to require no token when none is configured, so that local setups keep working with zero configuration, matching the rest of the app.
+26. As a worker, I want to call **get** on a channel and receive the oldest `pending` record, so that work is processed first-in first-out.
+27. As a worker, I want **get** to atomically mark the record as `processing`, so that a second worker calling at the same instant receives a different record or nothing.
+28. As a worker, I want **get** on an empty channel to return an explicit empty result with a success status rather than an error, so that polling loops do not need to treat "no work" as a failure.
+29. As a worker, I want **get** to work with either GET or POST, so that a tool that can only issue GETs still works.
+30. As a worker, I want to call **add** with one object or an array of objects, so that I can push new work, including follow-up work discovered while processing.
+31. As a worker, I want **set** on a record id to update its status and attach a free-form result object, so that I can mark work done or failed and hand back output.
+32. As a worker, I want **undo** on a record id to return a `processing` record to `pending`, so that an item I could not finish is retried by the next worker.
+33. As a worker, I want the record's own id in every response, so that I can call set or undo later.
+34. As a worker, I want the same `{ error: { code, message } }` error envelope the rest of the API uses, so that one error handler works everywhere.
+35. As a worker, I want a `not_found` error when the channel slug does not exist, so that a typo is obvious rather than silently creating a channel.
+36. As a worker, I want a `conflict` error when I try to undo a record that is not `processing`, so that I cannot accidentally reopen a finished record.
+37. As a worker, I want to authenticate with a bearer token when the operator has configured one, so that the queue can be reached from outside a trusted network.
+38. As an operator, I want the worker API to require no token when none is configured, so that local setups keep working with zero configuration, matching the rest of the app.
 
 ### Robustness
 
-38. As an operator, I want the status values to be a closed set, so that filters and counts are stable and a worker cannot invent a fifth state.
-39. As an operator, I want user data stored in its own sub-document so that keys like `status` or `_id` in my JSON can never collide with the record's own fields.
-40. As an operator, I want a record to remember when it was claimed, so that I can see how long something has been processing.
-41. As a developer, I want the queue operations covered by tests that run against a real MongoDB, so that FIFO order and claim atomicity are proven, not assumed.
+39. As an operator, I want the status values to be a closed set, so that filters and counts are stable and a worker cannot invent a fifth state.
+40. As an operator, I want user data stored in its own sub-document so that keys like `status` or `_id` in my JSON can never collide with the record's own fields.
+41. As an operator, I want a record to remember when it was claimed, so that I can see how long something has been processing.
+42. As a developer, I want the queue operations covered by tests that run against a real MongoDB, so that FIFO order and claim atomicity are proven, not assumed.
 
 ## Implementation Decisions
 
@@ -171,6 +172,9 @@ Implemented paths (the `channels` segment keeps them apart from a worker channel
 | Update a record                | `PATCH`  | `/api/db/channels/{name}/records/{id}`                    | `{ data?, status? }`, at least one                                                                  | `200 { record }`                                                                                  |
 | Delete a record                | `DELETE` | `/api/db/channels/{name}/records/{id}`                    | none                                                                                                | `200 { deleted: true }`                                                                           |
 | Bulk operation                 | `POST`   | `/api/db/channels/{name}/records/bulk`                    | `{ action: "reset_processing" }`, `{ action: "delete_by_status", status }` or `{ action: "clear" }` | `200 { affected }`                                                                                |
+| Export records                 | `GET`    | `/api/db/channels/{name}/records/export?status=&shape=&format=` | none                                                                                          | `200` file download (see below)                                                                   |
+
+**Export** streams every record of the channel, oldest first (queue order), as an attachment rather than the JSON envelope. `status` filters to one status. `shape` is `records` (default: the full record view) or `data` (only each record's `data` object, which the import endpoint and panel accept unchanged, so a channel can be copied or re-queued). `format` is `json` (default: one array) or `ndjson` (one object per line). The file name is `{name}[-{status}][-data].{format}`. The channel and query are checked before the first byte is sent, so an unknown channel or a bad query still answers `404` / `400` with the error envelope. The response is streamed from a database cursor, so channel size is not bounded by memory.
 
 A channel in responses is `{ id, name, description, counts: { pending, processing, done, failed }, createdAt, updatedAt }`. Record ids are always scoped to the channel in the path: an id from another channel answers `404 not_found`. Setting a status to `pending` (via worker `set`, operator update or bulk reset) clears `claimedAt`; setting it to `processing` by hand stamps `claimedAt` if it was empty.
 
@@ -186,7 +190,7 @@ A channel in responses is `{ id, name, description, counts: { pending, processin
 - **Channel list page** (`/db`): table of channels with counts per status and a "New channel" dialog (name, description). Row click opens the channel page.
 - **Channel page** (`/db/{channel}`): header with description, counts, and the channel's API base path shown as copyable text so an operator can paste it into a worker config. Below: import panel and records table.
 - **Import panel**: file input accepting `.json` and a textarea, either of which populates the same parsed array. On successful parse the panel shows the detected top-level keys as checkboxes with per-key occurrence counts, all checked by default, and an "Import N records" button. Parsing happens client-side; only the filtered objects are sent to the server.
-- **Records table**: status filter tabs, pagination, newest first. Row actions: view/edit (dialog with a JSON textarea for `data`, read-only `result`, and a status select), delete. Bulk actions in the header: reset processing, delete by status, clear channel (confirm dialog).
+- **Records table**: status filter tabs, pagination, newest first. Row actions: view/edit (dialog with a JSON textarea for `data`, read-only `result`, and a status select), delete. Bulk actions in the header: export (dialog with status, contents and format choices; downloads through the API with the bearer token attached), reset processing, delete by status, clear channel (confirm dialog).
 - Built with the existing shadcn/ui primitives already in the repo (table, dialog, select, textarea, badge, button).
 
 ## Testing Decisions
@@ -261,7 +265,6 @@ The records table and record dialog link `result.runId` to the run page; the run
 - **Per-channel tokens.** One shared token or none.
 - **Nested key selection, renaming or type coercion on import.** Top-level keys, keep or drop only.
 - **Duplicate detection on import.**
-- **Export of a channel to JSON.**
 - **Retention or automatic purge** of done records.
 - **Editing a channel's slug** after creation.
 - **Long-polling or SSE** for workers waiting on an empty channel; workers poll.

@@ -4,6 +4,7 @@ import { notFound } from "next/navigation"
 import { PageHeader } from "@/components/app/page-header"
 import { ChannelActions } from "@/components/db/channel-actions"
 import { CopyText } from "@/components/db/copy-text"
+import { ExportButton } from "@/components/db/export-button"
 import { ImportPanel } from "@/components/db/import-panel"
 import { RecordBulkActions } from "@/components/db/record-bulk-actions"
 import { RecordTable } from "@/components/db/record-table"
@@ -110,7 +111,10 @@ export default async function ChannelPage({
             )
           })}
         </div>
-        <RecordBulkActions channel={channel} />
+        <div className="flex flex-wrap items-center gap-1">
+          <ExportButton channel={channel} />
+          <RecordBulkActions channel={channel} />
+        </div>
       </div>
 
       <RecordTable
