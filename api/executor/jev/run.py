@@ -31,12 +31,14 @@ from .policy import (
     Transport,
     TypeSafePolicy,
 )
-from .state import StaleObservationError, input_matches
+from .state import StaleObservationError, input_matches, screen_locked
 
 logger = logging.getLogger(__name__)
 
 SETTLE_TIMEOUT_S = 0.4
 WAIT_TIMEOUT_S = 15.0
+#: How long the screen is given to change after a wake key press or an unlock swipe.
+WAKE_TIMEOUT_S = 2.0
 INPUT_TIMEOUT_S = 2.5
 POLL_S = 0.06
 REQUEST_TIMEOUT_S = 30.0
@@ -64,6 +66,10 @@ OUTCOMES = {
     "unstable_screen": "The screen kept changing before an action could be executed.",
     "input_unverified": "Text was sent, but the field did not show the complete value. Inspect the screen before retrying.",
     "decision_limit": "Reached the model-call limit.",
+    "locked": (
+        "The device stayed on its lock screen after being woken. "
+        "Unlock it or remove the screen lock, then run again."
+    ),
 }
 
 
@@ -289,6 +295,28 @@ class JevAgentRun:
                 logger.debug("jev screenshot failed", exc_info=True)
                 return None
 
+        async def settle_wake(previous: dict[str, Any]) -> dict[str, Any]:
+            """The screen once it has reacted to a wake key or unlock swipe, or as it is at the deadline."""
+            deadline = time.monotonic() + WAKE_TIMEOUT_S
+            current = await device.observe()
+            while (
+                screen_locked(current)
+                and current["fingerprint"] == previous["fingerprint"]
+                and time.monotonic() < deadline
+            ):
+                await self._sleep(POLL_S)
+                current = await device.observe()
+            return current
+
+        async def wake_screen(asleep: dict[str, Any]) -> dict[str, Any]:
+            """Turns the screen on and swipes an insecure lock screen away; returns what is shown then."""
+            await device.wake()
+            current = await settle_wake(asleep)
+            if screen_locked(current):
+                await device.dismiss_keyguard(current)
+                current = await settle_wake(current)
+            return current
+
         await device.connect()
         observation, installed_apps = await asyncio.gather(device.observe(), device.list_apps())
         yield RunEvent("log", {"message": f"Jev ({self.config.model} via {self.config.provider}) on {len(installed_apps)} installed apps"})
@@ -305,6 +333,25 @@ class JevAgentRun:
 
         # Stale decisions never dispatch input, but still consume a separate model-call budget.
         for _attempt in range(max_steps * 2 + 4):
+            if screen_locked(observation):
+                # Handled in code: the screen went to sleep (e.g. during a slow decision) or the run
+                # started on the lock screen. Jev would only keep re-opening the app behind it.
+                yield RunEvent("log", {"message": "The screen is off or locked; waking the device"})
+                observation = await wake_screen(observation)
+                locked = screen_locked(observation)
+                yield RunEvent(
+                    "action",
+                    {
+                        "tool": "wake",
+                        "args": {"type": "wake"},
+                        "success": not locked,
+                        "summary": "Wake the screen",
+                    },
+                )
+                if locked:
+                    yield result("locked")
+                    return
+                repeated.clear()
             context = dict(base_context)
             card = _app_card(spec.app_cards, observation["phone"]["packageName"])
             if card is not None:

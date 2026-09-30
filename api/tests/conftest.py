@@ -38,6 +38,8 @@ class FakeFramework:
         ]
         self.opened_urls: list[tuple[str, str]] = []
         self.woken: list[str] = []
+        self.kept_awake: list[str] = []
+        self.sleep_restored: list[tuple[str, str]] = []
         # Android users per serial; the owner is in the foreground to begin with.
         self.users: dict[str, list[DeviceUser]] = {
             "emulator-5554": [
@@ -134,6 +136,13 @@ class FakeFramework:
 
     async def wake(self, serial: str) -> None:
         self.woken.append(serial)
+
+    async def keep_awake(self, serial: str) -> str:
+        self.kept_awake.append(serial)
+        return "0"
+
+    async def restore_sleep(self, serial: str, previous: str) -> None:
+        self.sleep_restored.append((serial, previous))
 
     def create_run(self, spec: RunSpec) -> "FakeAgentRun":
         self.specs.append(spec)

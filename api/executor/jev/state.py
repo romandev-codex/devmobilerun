@@ -10,6 +10,7 @@ from __future__ import annotations
 import hashlib
 import json
 import math
+import re
 import time
 from typing import Any
 
@@ -20,6 +21,26 @@ EDITABLE_CLASSES = frozenset(
         "android.widget.MultiAutoCompleteTextView",
     }
 )
+
+
+#: Resource ids SystemUI (and Samsung's always-on display service) use for a sleeping or locked
+#: screen. The notification shade is SystemUI too, but its ids never match these.
+LOCK_SCREEN_IDS = re.compile(r"aodservice|keyguard|lock_?screen|lock_icon", re.IGNORECASE)
+
+
+def screen_locked(observation: dict[str, Any]) -> bool:
+    """Whether the observation shows a sleeping screen (always-on display) or the lock screen.
+
+    Jev cannot act on either: OPEN_APP starts the app behind the keyguard and every tap lands
+    on the clock. The session wakes the device in code before asking Jev again.
+    """
+    package = observation["phone"]["packageName"]
+    if "aodservice" in package or "keyguard" in package:
+        return True
+    if package != "com.android.systemui":
+        return False
+    elements = observation["elements"]
+    return not elements or any(LOCK_SCREEN_IDS.search(e["resourceId"] or "") for e in elements)
 
 
 class StaleObservationError(Exception):

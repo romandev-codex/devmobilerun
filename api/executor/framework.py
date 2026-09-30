@@ -245,6 +245,10 @@ class Framework(Protocol):
 
     async def wake(self, serial: str) -> None: ...
 
+    async def keep_awake(self, serial: str) -> str: ...
+
+    async def restore_sleep(self, serial: str, previous: str) -> None: ...
+
     def create_run(self, spec: RunSpec) -> AgentRun: ...
 
 
@@ -526,6 +530,24 @@ class MobilerunFramework:
 
         device = await adb.device(serial=serial)
         await device.shell(["input", "keyevent", "KEYCODE_HOME"])
+
+    async def keep_awake(self, serial: str) -> str:
+        """Keeps the screen on while the device is plugged in, for the length of a run.
+
+        A phone farm's devices sit on power; without this a slow decision lets the screen time
+        out and the agent lands on the lock screen. Returns the previous
+        ``stay_on_while_plugged_in`` setting for :meth:`restore_sleep`.
+        """
+        previous = await self._shell(serial, ["settings", "get", "global", "stay_on_while_plugged_in"])
+        await self._shell(serial, ["svc", "power", "stayon", "true"])
+        return previous.strip()
+
+    async def restore_sleep(self, serial: str, previous: str) -> None:
+        """Puts the screen timeout back as :meth:`keep_awake` found it."""
+        if previous.isdigit():
+            await self._shell(serial, ["settings", "put", "global", "stay_on_while_plugged_in", previous])
+        else:
+            await self._shell(serial, ["svc", "power", "stayon", "false"])
 
     def create_run(self, spec: RunSpec) -> AgentRun:
         if spec.agent == "jev":

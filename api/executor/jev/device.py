@@ -14,6 +14,8 @@ from .state import assert_fresh, find_element, prepare_input_verification, summa
 
 KEYS = {"back": 4, "tab": 61, "enter": 66, "delete": 67, "forward_delete": 112}
 GLOBAL_BUTTONS = {"back", "home"}
+#: Turns the screen on without toggling it off again, unlike KEYCODE_POWER.
+KEYCODE_WAKEUP = 224
 
 
 class Driver(Protocol):
@@ -72,6 +74,16 @@ class JevDevice:
 
     async def screenshot(self) -> bytes:
         return await self.driver.screenshot(hide_overlay=True)
+
+    async def wake(self) -> None:
+        """Turns a sleeping screen on; the lock screen (if any) is shown next."""
+        await self.driver.press_key_code(KEYCODE_WAKEUP)
+
+    async def dismiss_keyguard(self, observation: dict[str, Any]) -> None:
+        """Swipes up from the bottom of the lock screen, which unlocks a device without a PIN."""
+        width, height = observation["screen"]["width"], observation["screen"]["height"]
+        x = width // 2
+        await self.driver.swipe(x, int(height * 0.8), x, int(height * 0.25), duration_ms=300)
 
     async def close_app(self, package: str) -> None:
         """Force-stops an installed app, then shows the home screen."""

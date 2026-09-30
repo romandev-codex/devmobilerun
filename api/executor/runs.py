@@ -174,6 +174,8 @@ class RunManager:
         # Screenshot numbering carried across phases so the end step continues
         # the goal's steps instead of restarting at zero.
         progress = [0]
+        # The stay-awake setting as found on the device, put back when the run ends.
+        stay_awake: str | None = None
         try:
             # The profile comes first: HOME, the start URL and the agent all
             # belong to it. Unlike a failed wake, a failed switch ends the run —
@@ -186,6 +188,12 @@ class RunManager:
             except Exception as exc:  # noqa: BLE001 - the run may still work on an awake screen
                 logger.warning("run %s: HOME press failed: %s", spec.run_id, exc)
                 run.publish(RunEvent("log", {"message": f"HOME press to wake the device failed: {exc}"}))
+            # The screen must not time out while a model deliberates: a sleeping screen ends the run.
+            try:
+                stay_awake = await self._framework.keep_awake(spec.device_serial)
+            except Exception as exc:  # noqa: BLE001 - the run may still finish before the screen sleeps
+                logger.warning("run %s: keep awake failed: %s", spec.run_id, exc)
+                run.publish(RunEvent("log", {"message": f"Keeping the screen awake failed: {exc}"}))
             if spec.start_url:
                 await self._framework.open_url(spec.device_serial, spec.start_url)
                 run.publish(RunEvent("log", {"message": f"Opened {spec.start_url}"}))
@@ -213,6 +221,11 @@ class RunManager:
             logger.exception("run %s failed", spec.run_id)
             run.publish(RunEvent("error", {"message": f"{type(exc).__name__}: {exc}"}))
         finally:
+            if stay_awake is not None:
+                try:
+                    await self._framework.restore_sleep(spec.device_serial, stay_awake)
+                except Exception as exc:  # noqa: BLE001 - the device keeps its screen on, nothing worse
+                    logger.warning("run %s: restoring the screen timeout failed: %s", spec.run_id, exc)
             if not run.done:
                 run.publish(RunEvent("error", {"message": "Run ended unexpectedly"}))
 

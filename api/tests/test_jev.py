@@ -10,7 +10,7 @@ import pytest
 
 from executor.framework import RunSpec
 from executor.jev.advisor import Advisor
-from executor.jev.device import JevDevice
+from executor.jev.device import KEYCODE_WAKEUP, JevDevice
 from executor.jev.policy import (
     PolicyError,
     TypeSafePolicy,
@@ -19,7 +19,7 @@ from executor.jev.policy import (
     validate_choice,
 )
 from executor.jev.run import JevAgentRun, JevConfig, close_app_target, httpx_transport, jev_config
-from executor.jev.state import StaleObservationError, assert_fresh, summarize_state
+from executor.jev.state import StaleObservationError, assert_fresh, screen_locked, summarize_state
 
 pytestmark = pytest.mark.anyio
 
@@ -55,6 +55,23 @@ SETTINGS = raw_state(
     node((0, 200, 1080, 400), text="Display", isClickable=True),
     package="com.android.settings",
 )
+# A Samsung phone asleep: SystemUI is in front, its always-on display service draws the clock.
+_AOD = "com.samsung.android.app.aodservice:id/"
+ASLEEP = raw_state(
+    node((492, 1876, 622, 1949), text="100%", resourceId=_AOD + "common_battery_text"),
+    node((329, 560, 750, 718), text="19:15", resourceId=_AOD + "common_time_area"),
+    package="com.android.systemui",
+)
+LOCK_SCREEN = raw_state(
+    node((0, 500, 1080, 800), text="19:15", resourceId="com.android.systemui:id/keyguard_clock_container"),
+    node(
+        (0, 2100, 1080, 2300),
+        contentDescription="Swipe up to unlock",
+        resourceId="com.android.systemui:id/keyguard_bottom_area",
+    ),
+    package="com.android.systemui",
+)
+UNLOCK_SWIPE = ("swipe", 540, 1920, 540, 600)
 
 
 class FakeDriver:
@@ -436,6 +453,68 @@ async def test_session_stops_at_the_step_limit():
     events = await run_session(driver, jev, max_steps=2)
     assert len(driver.actions) == 2
     assert events[-1].payload == {"success": False, "reason": "Reached the step limit.", "steps": 2}
+
+
+def test_screen_locked_spots_the_always_on_display_and_keyguard_but_not_the_shade():
+    assert screen_locked(summarize_state(ASLEEP, SERIAL))
+    assert screen_locked(summarize_state(LOCK_SCREEN, SERIAL))
+    shade = raw_state(
+        node((0, 0, 1080, 1200), isScrollable=True, resourceId="com.android.systemui:id/notification_stack_scroller"),
+        package="com.android.systemui",
+    )
+    assert not screen_locked(summarize_state(shade, SERIAL))
+    assert not screen_locked(summarize_state(LAUNCHER, SERIAL))
+
+
+async def test_session_wakes_a_sleeping_screen_before_asking_jev():
+    def navigate(driver: FakeDriver, action: tuple) -> None:
+        if action == ("key", KEYCODE_WAKEUP):
+            driver.state = LOCK_SCREEN
+        elif action[0] == "swipe":
+            driver.state = LAUNCHER
+        elif action[0] == "tap":
+            driver.state = SETTINGS
+
+    driver = FakeDriver(ASLEEP, navigate)
+    jev = ScriptedJev([("TAP", "Settings"), ("DONE", None)])
+    events = await run_session(driver, jev)
+    assert driver.actions == [("key", KEYCODE_WAKEUP), UNLOCK_SWIPE, ("tap", 270, 200)]
+    # Jev never saw the sleeping screen or the keyguard.
+    assert [b["state"]["app"] for b in jev.bodies] == ["com.android.launcher", "com.android.settings"]
+    wake = next(e for e in events if e.type == "action" and e.payload["tool"] == "wake")
+    assert wake.payload["success"] is True
+    assert (events[-1].payload["success"], events[-1].payload["steps"]) == (True, 1)
+
+
+async def test_session_wakes_a_screen_that_slept_after_an_action():
+    # As in a real run: the screen timed out during a slow decision, and the app was then
+    # started behind the always-on display. Waking shows the app, and Jev goes on from there.
+    def navigate(driver: FakeDriver, action: tuple) -> None:
+        if action[0] == "start_app":
+            driver.state = ASLEEP
+        elif action == ("key", KEYCODE_WAKEUP):
+            driver.state = SETTINGS
+
+    driver = FakeDriver(LAUNCHER, navigate)
+    jev = ScriptedJev([("OPEN_APP", "Settings"), ("DONE", None)])
+    events = await run_session(driver, jev)
+    assert driver.actions == [("start_app", "com.android.settings"), ("key", KEYCODE_WAKEUP)]
+    assert [b["state"]["app"] for b in jev.bodies] == ["com.android.launcher", "com.android.settings"]
+    assert events[-1].payload["success"] is True
+
+
+async def test_session_ends_when_the_lock_screen_stays_after_waking():
+    def navigate(driver: FakeDriver, action: tuple) -> None:
+        if action == ("key", KEYCODE_WAKEUP):
+            driver.state = LOCK_SCREEN  # a PIN lock: the swipe changes nothing
+
+    driver = FakeDriver(ASLEEP, navigate)
+    jev = ScriptedJev([("DONE", None)])
+    events = await run_session(driver, jev)
+    assert driver.actions == [("key", KEYCODE_WAKEUP), UNLOCK_SWIPE]
+    assert jev.bodies == []
+    assert events[-1].payload["success"] is False
+    assert events[-1].payload["reason"].startswith("The device stayed on its lock screen")
 
 
 async def test_session_stops_when_an_action_leaves_the_screen_unchanged_twice():

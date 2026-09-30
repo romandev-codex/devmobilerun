@@ -64,6 +64,27 @@ async def test_a_failed_wake_is_logged_and_the_run_goes_on(client, framework):
     assert [e.event for e in events][1:] == ["started", "thought", "action", "result"]
 
 
+async def test_the_screen_is_kept_awake_for_the_run_and_released_after(client, framework):
+    await client.post("/runs", json=start_body(run_id="run-awake"))
+    events = await collect_events(client, "run-awake")
+    assert events[-1].event == "result"
+    assert framework.kept_awake == ["emulator-5554"]
+    assert framework.sleep_restored == [("emulator-5554", "0")]
+
+
+async def test_a_failed_keep_awake_is_logged_and_the_run_goes_on(client, framework):
+    async def broken(serial: str) -> str:
+        raise RuntimeError("svc missing")
+
+    framework.keep_awake = broken
+    await client.post("/runs", json=start_body(run_id="run-awake-fail"))
+    events = await collect_events(client, "run-awake-fail")
+    assert events[0].event == "log"
+    assert events[0].data["message"] == "Keeping the screen awake failed: svc missing"
+    assert [e.event for e in events][1:] == ["started", "thought", "action", "result"]
+    assert framework.sleep_restored == []
+
+
 async def test_run_without_start_url_does_not_open_anything(client, framework):
     await client.post("/runs", json=start_body(run_id="run-2"))
     events = await collect_events(client, "run-2")
