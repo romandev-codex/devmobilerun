@@ -41,6 +41,7 @@ export default async function TaskPage({
           <TaskActions
             taskId={task.id}
             taskName={task.name}
+            taskDeviceUser={task.deviceUser}
             scheduleCount={task.scheduleCount}
           />
         }

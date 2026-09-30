@@ -20,12 +20,14 @@ import { apiFetch } from "@/lib/client/api"
 export function TaskActions({
   taskId,
   taskName,
+  taskDeviceUser = null,
   scheduleCount,
   afterDelete = "/tasks",
   editHref,
 }: {
   taskId: string
   taskName: string
+  taskDeviceUser?: string | null
   scheduleCount: number
   afterDelete?: string
   editHref?: string
@@ -64,7 +66,11 @@ export function TaskActions({
       {error ? (
         <span className="mr-2 text-xs text-destructive">{error}</span>
       ) : null}
-      <RunTaskButton taskId={taskId} taskName={taskName} />
+      <RunTaskButton
+        taskId={taskId}
+        taskName={taskName}
+        taskDeviceUser={taskDeviceUser}
+      />
       {editHref ? (
         <Button
           variant="ghost"

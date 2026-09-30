@@ -81,9 +81,12 @@ class RunSpec:
     focus: str | None = None
 
 
-#: How long a user switch may take before it is reported as failed.
-SWITCH_USER_POLLS = 40
-SWITCH_USER_POLL_SECONDS = 0.5
+#: How long a user switch may take before it is reported as failed. A first
+#: switch to a new user boots that user, which takes a while on real phones.
+SWITCH_USER_TIMEOUT_SECONDS = 120.0
+SWITCH_USER_POLL_SECONDS = 1.0
+#: Pause after the user is unlocked, for the launcher to come up before HOME is pressed.
+SWITCH_USER_SETTLE_SECONDS = 2.0
 
 #: The end step is cleanup, not a second goal, so it gets a small budget of its
 #: own — a task that spent every step on the goal can still be tidied up.
@@ -132,6 +135,18 @@ def parse_created_user_id(output: str) -> int:
     if not match:
         raise DeviceUserError(output.strip() or "pm create-user produced no output")
     return int(match.group(1))
+
+
+def _unknown_option(output: str) -> bool:
+    """Whether ``am`` rejected a flag it does not know (older Android)."""
+    lowered = output.lower()
+    return "unknown option" in lowered or "unknown argument" in lowered or "bad option" in lowered
+
+
+def _unknown_command(output: str) -> bool:
+    """Whether ``am`` rejected the command itself (older Android)."""
+    lowered = output.lower()
+    return "unknown command" in lowered or "unknown option" in lowered or "usage:" in lowered
 
 
 def _device_is_gone(exc: Exception) -> bool:
@@ -298,17 +313,43 @@ class MobilerunFramework:
             raise DeviceUserError(output.strip() or f"pm remove-user gave no answer for user {user_id}")
 
     async def switch_user(self, serial: str, user_id: int) -> None:
-        """Brings the user to the foreground and waits until the device reports it."""
+        """Brings the user to the foreground and waits for the switch to complete.
+
+        ``am switch-user -w`` blocks until the switch is done on devices that
+        support the flag; older ones are asked without it. Either way the device
+        is then polled until it reports the user as current and unlocked, since
+        the foreground changes before the user has finished starting.
+        """
         import asyncio
 
-        output = await self._shell(serial, ["am", "switch-user", str(user_id)])
+        output = await self._shell(serial, ["am", "switch-user", "-w", str(user_id)])
+        if _unknown_option(output):
+            output = await self._shell(serial, ["am", "switch-user", str(user_id)])
         if "error" in output.lower():
             raise DeviceUserError(output.strip())
-        for _ in range(SWITCH_USER_POLLS):
-            if await self._current_user(serial) == user_id:
+        deadline = asyncio.get_running_loop().time() + SWITCH_USER_TIMEOUT_SECONDS
+        while True:
+            if await self._current_user(serial) == user_id and await self._user_unlocked(serial, user_id):
+                await asyncio.sleep(SWITCH_USER_SETTLE_SECONDS)
                 return
+            if asyncio.get_running_loop().time() >= deadline:
+                raise DeviceUserError(
+                    f"Device did not finish switching to user {user_id} within {SWITCH_USER_TIMEOUT_SECONDS:.0f}s"
+                )
             await asyncio.sleep(SWITCH_USER_POLL_SECONDS)
-        raise DeviceUserError(f"Device did not switch to user {user_id} in time")
+
+    async def _user_unlocked(self, serial: str, user_id: int) -> bool:
+        """Whether the user has finished starting (``RUNNING_UNLOCKED``).
+
+        ``am get-started-user-state`` reports it on Android 10 and later; on
+        devices without the command the ``running`` mark from ``pm list users``
+        is the best available signal.
+        """
+        output = await self._shell(serial, ["am", "get-started-user-state", str(user_id)])
+        if _unknown_command(output):
+            users = parse_user_list(await self._shell(serial, ["pm", "list", "users"]), user_id)
+            return any(u.id == user_id and u.running for u in users)
+        return "RUNNING_UNLOCKED" in output
 
     async def open_url(self, serial: str, url: str) -> None:
         from async_adbutils import adb

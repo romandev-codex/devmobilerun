@@ -221,3 +221,91 @@ async def test_remove_user_runs_pm_remove_user_with_force():
     assert calls == [["pm", "remove-user", "-f", "12"]]
     with pytest.raises(DeviceUserError, match="couldn't remove"):
         await framework.remove_user("emulator-5554", 12)
+
+
+class ScriptedShell:
+    """Answers adb shell commands from a script keyed by the command's first words."""
+
+    def __init__(self, answers: dict[str, list[str]]):
+        self.answers = {k: list(v) for k, v in answers.items()}
+        self.calls: list[list[str]] = []
+
+    async def __call__(self, serial: str, args: list[str]) -> str:
+        self.calls.append(args)
+        key = " ".join(args[:2])
+        queue = self.answers[key]
+        return queue.pop(0) if len(queue) > 1 else queue[0]
+
+
+@pytest.fixture
+def fast_switch(monkeypatch):
+    from executor import framework
+
+    monkeypatch.setattr(framework, "SWITCH_USER_POLL_SECONDS", 0.0)
+    monkeypatch.setattr(framework, "SWITCH_USER_SETTLE_SECONDS", 0.0)
+    monkeypatch.setattr(framework, "SWITCH_USER_TIMEOUT_SECONDS", 0.2)
+
+
+async def test_switch_user_waits_until_the_user_is_current_and_unlocked(fast_switch):
+    from executor.framework import MobilerunFramework
+
+    shell = ScriptedShell(
+        {
+            "am switch-user": [""],
+            "am get-current-user": ["0", "10"],
+            "am get-started-user-state": ["RUNNING_LOCKED", "RUNNING_UNLOCKED"],
+        }
+    )
+    framework = MobilerunFramework()
+    framework._shell = shell  # type: ignore[method-assign]
+    await framework.switch_user("emulator-5554", 10)
+    assert shell.calls[0] == ["am", "switch-user", "-w", "10"]
+    # Polled until both the foreground and the unlocked state agreed.
+    states = [c for c in shell.calls if c[:2] == ["am", "get-started-user-state"]]
+    assert len(states) == 2
+    assert shell.calls[-1] == ["am", "get-started-user-state", "10"]
+
+
+async def test_switch_user_falls_back_without_the_wait_flag_and_to_pm_running(fast_switch):
+    from executor.framework import MobilerunFramework
+
+    shell = ScriptedShell(
+        {
+            "am switch-user": ["Error: Unknown option: -w", ""],
+            "am get-current-user": ["10"],
+            "am get-started-user-state": ["Error: unknown command 'get-started-user-state'"],
+            "pm list": ["Users:\n\tUserInfo{0:Owner:c13} running\n\tUserInfo{10:Work:c10}\n",
+                        "Users:\n\tUserInfo{0:Owner:c13} running\n\tUserInfo{10:Work:c10} running\n"],
+        }
+    )
+    framework = MobilerunFramework()
+    framework._shell = shell  # type: ignore[method-assign]
+    await framework.switch_user("emulator-5554", 10)
+    assert shell.calls[:2] == [["am", "switch-user", "-w", "10"], ["am", "switch-user", "10"]]
+    assert ["pm", "list", "users"] in shell.calls
+
+
+async def test_switch_user_times_out_when_the_user_never_unlocks(fast_switch):
+    from executor.framework import DeviceUserError, MobilerunFramework
+
+    shell = ScriptedShell(
+        {
+            "am switch-user": [""],
+            "am get-current-user": ["10"],
+            "am get-started-user-state": ["RUNNING_LOCKED"],
+        }
+    )
+    framework = MobilerunFramework()
+    framework._shell = shell  # type: ignore[method-assign]
+    with pytest.raises(DeviceUserError, match="did not finish switching to user 10"):
+        await framework.switch_user("emulator-5554", 10)
+
+
+async def test_switch_user_reports_a_refused_switch(fast_switch):
+    from executor.framework import DeviceUserError, MobilerunFramework
+
+    shell = ScriptedShell({"am switch-user": ["Error: user 99 does not exist"]})
+    framework = MobilerunFramework()
+    framework._shell = shell  # type: ignore[method-assign]
+    with pytest.raises(DeviceUserError, match="does not exist"):
+        await framework.switch_user("emulator-5554", 99)

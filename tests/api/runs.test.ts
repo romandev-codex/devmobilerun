@@ -96,12 +96,16 @@ async function createTask(overrides: Record<string, unknown> = {}) {
   return (await res.json()).task as { id: string }
 }
 
-async function runNow(taskId: string, deviceSerial = "emulator-5554") {
+async function runNow(
+  taskId: string,
+  deviceSerial = "emulator-5554",
+  extra: Record<string, unknown> = {}
+) {
   const { POST } = await import("@/app/api/tasks/[id]/run/route")
   const res = await POST(
     new Request(`http://app/api/tasks/${taskId}/run`, {
       method: "POST",
-      ...json({ deviceSerial }),
+      ...json({ deviceSerial, ...extra }),
     }),
     { params: Promise.resolve({ id: taskId }) }
   )
@@ -268,6 +272,18 @@ describe("executeRun", () => {
       deviceSerial: "emulator-5554",
       deviceUser: "Work",
     })
+  })
+
+  it("lets Run now pick a profile for the run, or keep the phone's active one", async () => {
+    await syncDevices()
+    const task = await createTask({ deviceUser: "Work" })
+    const chosen = await runNow(task.id, "emulator-5554", { deviceUser: "QA" })
+    expect(chosen.status).toBe(201)
+    expect(chosen.body.run.deviceUser).toBe("QA")
+    const kept = await runNow(task.id, "emulator-5554", { deviceUser: null })
+    expect(kept.body.run.deviceUser).toBeNull()
+    const cleared = await runNow(task.id, "emulator-5554", { deviceUser: "" })
+    expect(cleared.body.run.deviceUser).toBeNull()
   })
 
   it("starts a Jev task with the Jev agent on the executor", async () => {

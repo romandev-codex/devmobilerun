@@ -6,8 +6,15 @@ type Ctx = { params: Promise<{ id: string }> }
 
 export const POST = route<Ctx>(async (req, { params }) => {
   const { id } = await params
-  const { deviceSerial } = await parseJson(req, (d) => runNowSchema.parse(d))
-  const run = await createRun({ taskId: id, deviceSerial, trigger: "manual" })
+  const { deviceSerial, deviceUser } = await parseJson(req, (d) =>
+    runNowSchema.parse(d)
+  )
+  const run = await createRun({
+    taskId: id,
+    deviceSerial,
+    deviceUser,
+    trigger: "manual",
+  })
   await enqueueRun(run.id)
   return Response.json({ run }, { status: 201 })
 })

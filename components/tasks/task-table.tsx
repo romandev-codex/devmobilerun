@@ -74,6 +74,7 @@ export function TaskTable({ tasks }: { tasks: TaskSummary[] }) {
                 <TaskActions
                   taskId={t.id}
                   taskName={t.name}
+                  taskDeviceUser={t.deviceUser}
                   scheduleCount={t.scheduleCount}
                   editHref={`/tasks/${t.id}`}
                 />

@@ -21,7 +21,7 @@ import {
   recordInstructionBlock,
   recordVariables,
 } from "@/lib/runs/compose"
-import { getTask, type TaskSummary } from "@/lib/tasks"
+import { getTask, taskDeviceUserSchema, type TaskSummary } from "@/lib/tasks"
 
 export type RunView = {
   id: string
@@ -127,7 +127,14 @@ function runFields(
   }
 }
 
-export const runNowSchema = z.object({ deviceSerial: z.string().trim().min(1) })
+export const runNowSchema = z.object({
+  deviceSerial: z.string().trim().min(1),
+  /**
+   * Profile to switch the phone to for this run. Absent: the task's profile;
+   * null or empty: whatever profile is active on the phone stays.
+   */
+  deviceUser: taskDeviceUserSchema.optional(),
+})
 
 /**
  * Creates a queued run for a task on a device. Refuses when the device is
@@ -138,6 +145,8 @@ export async function createRun(input: {
   deviceSerial: string
   trigger: "manual" | "schedule"
   scheduleId?: string | null
+  /** Overrides the task's profile for this run; null keeps the phone's active profile. */
+  deviceUser?: string | null
 }): Promise<RunView> {
   await connectDb()
   const task = await getTask(input.taskId)
@@ -148,6 +157,7 @@ export async function createRun(input: {
     throw conflict(`Device ${input.deviceSerial} is busy with another run`)
 
   const fields = runFields(task, input.deviceSerial, input.scheduleId ?? null)
+  if (input.deviceUser !== undefined) fields.deviceUser = input.deviceUser
   // A channel-bound task consumes exactly one record per run: claim it now so
   // the run carries the record's fields, and give it back if the run is never written.
   const record = task.channel ? await claimNextRecord(task.channel) : null
