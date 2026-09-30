@@ -99,8 +99,9 @@ SWITCH_USER_POLL_SECONDS = 1.0
 #: How long to wait for a freshly installed Portal to answer with its version.
 PORTAL_VERSION_TIMEOUT_SECONDS = 10.0
 PORTAL_VERSION_POLL_SECONDS = 1.0
-#: Pause after the user is unlocked, for the launcher to come up before HOME is pressed.
-SWITCH_USER_SETTLE_SECONDS = 2.0
+#: Pause after the user is unlocked, for the launcher and the profile's apps to
+#: come up before HOME is pressed. Only paid when the device actually switched.
+SWITCH_USER_SETTLE_SECONDS = 60.0
 
 #: The end step is cleanup, not a second goal, so it gets a small budget of its
 #: own — a task that spent every step on the goal can still be tidied up.
