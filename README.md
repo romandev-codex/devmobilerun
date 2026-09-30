@@ -91,6 +91,7 @@ npm run check                   # typecheck + lint + both test suites
 | `MONGODB_DB`       | app      | Database name; overrides the database in `MONGODB_URI` when set                    |
 | `EXECUTOR_URL`     | app      | Base URL of the executor, default `http://127.0.0.1:8765`                          |
 | `EXECUTOR_TOKEN`   | both     | Shared secret sent as `X-Mobilerun-Token`; the executor refuses to start without it |
+| `SCHEDULE_ACTIVE`  | app      | `false` pauses schedules: ticks and queue dispatch start no runs, "run now" still works; unset means active |
 | `EXECUTOR_HOST`    | executor | Bind address, default `127.0.0.1`                                                  |
 | `EXECUTOR_PORT`    | executor | Port, default `8765`                                                               |
 | `MOBILERUN_CONFIG` | executor | Optional path to a framework config file                                           |

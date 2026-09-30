@@ -714,6 +714,44 @@ describe("schedules", () => {
     await stop(id)
   })
 
+  it("SCHEDULE_ACTIVE=false pauses ticks and dispatch without losing the schedule", async () => {
+    const t = await task("paused")
+    const interval = (
+      await create({ taskId: t, deviceSerial: "A", intervalSeconds: 300 })
+    ).body.schedule.id as string
+    const queue = (
+      await create({ taskId: t, deviceSerial: "U", mode: "queue", order: 1 })
+    ).body.schedule.id as string
+    const { dispatchDevices } = await import("@/lib/schedules")
+
+    process.env.SCHEDULE_ACTIVE = "false"
+    try {
+      const before = Date.now()
+      await tick(interval)
+      expect(await runsFor(interval)).toHaveLength(0)
+      const s = await get(interval)
+      expect(s).toMatchObject({ enabled: true, runCount: 0, lastRunId: null })
+      // The tick was deferred one interval, not dropped.
+      expect(new Date(s.nextRunAt).getTime()).toBeGreaterThanOrEqual(
+        before + 300_000
+      )
+      expect(await pendingTicks(interval)).toBe(1)
+
+      expect(await dispatchDevices()).toBe(0)
+      expect(await runsFor(queue)).toHaveLength(0)
+      expect((await get(queue)).enabled).toBe(true)
+    } finally {
+      delete process.env.SCHEDULE_ACTIVE
+    }
+
+    await tick(interval)
+    expect((await get(interval)).runCount).toBe(1)
+    expect(await dispatchDevices()).toBe(1)
+    await drain("U")
+    expect((await get(queue)).runCount).toBe(1)
+    await stop(interval, queue)
+  })
+
   it("switching modes moves the tick with it, and a half-switch is refused", async () => {
     const t = await task("switch")
     const id = (

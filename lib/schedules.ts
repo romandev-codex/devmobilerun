@@ -3,6 +3,7 @@ import { z } from "zod"
 
 import { notFound } from "@/lib/api/errors"
 import { asObjectId as toObjectId, connectDb } from "@/lib/db"
+import { getEnv } from "@/lib/env"
 import { hasPendingRecord } from "@/lib/db-channels"
 import { deviceCooldownUntil } from "@/lib/device-thermal"
 import { syncDevices } from "@/lib/devices"
@@ -18,6 +19,14 @@ import { Task } from "@/lib/models/task"
 import { createRun, createSkippedRun } from "@/lib/runs/service"
 
 const asObjectId = (id: string, what = "Schedule") => toObjectId(id, what)
+
+/**
+ * False while `SCHEDULE_ACTIVE=false`: schedules keep their timers and their
+ * place in the queue, but no tick or dispatch starts a run until it is lifted.
+ */
+export function schedulesActive(): boolean {
+  return getEnv().SCHEDULE_ACTIVE
+}
 
 export const SCHEDULE_TICK_JOB = "schedule-tick"
 export type ScheduleTickData = { scheduleId: string }
@@ -498,6 +507,7 @@ export async function dispatchDevices(): Promise<number> {
   } catch {
     return 0 // executor unreachable: nothing could start anyway
   }
+  if (!schedulesActive()) return 0 // paused; the poll still refreshed devices
   const devices = await Device.find({ online: true, activeRunId: null })
     .select("serial")
     .lean<{ serial: string }[]>()
@@ -539,6 +549,9 @@ export async function executeScheduleTick(scheduleId: string): Promise<void> {
   )
   let dueAt: Date | undefined
   try {
+    // Paused: skip this firing quietly and come back next interval, so the
+    // schedule resumes on its own once SCHEDULE_ACTIVE is lifted.
+    if (!schedulesActive()) return
     let unavailable: string | null = null
     try {
       await syncDevices()

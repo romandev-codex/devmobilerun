@@ -11,6 +11,15 @@ const envSchema = z.object({
     .trim()
     .optional()
     .transform((v) => (v ? v : undefined)),
+  /**
+   * Set to `false` to pause schedules: ticks and queue dispatch stop starting
+   * runs (manual "run now" still works). Unset means active.
+   */
+  SCHEDULE_ACTIVE: z
+    .string()
+    .trim()
+    .optional()
+    .transform((v) => v == null || v === "" || /^(1|true|yes|on)$/i.test(v)),
 })
 
 export type Env = z.infer<typeof envSchema>

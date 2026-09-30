@@ -10,6 +10,7 @@ import {
   executeScheduleTick,
   reconcileSchedules,
   SCHEDULE_TICK_JOB,
+  schedulesActive,
   type ScheduleTickData,
 } from "@/lib/schedules"
 import {
@@ -103,6 +104,10 @@ export function startAgenda(): Promise<void> {
         const report = await reconcileOnBoot()
         const planned = await reconcileSchedules()
         if (planned) console.warn("[agenda] re-planned schedules", planned)
+        if (!schedulesActive())
+          console.warn(
+            "[agenda] SCHEDULE_ACTIVE=false: schedules are paused, ticks and queue dispatch start no runs"
+          )
         if (
           report.resumedRuns ||
           report.enqueuedRuns ||
