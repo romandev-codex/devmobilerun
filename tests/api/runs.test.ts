@@ -193,6 +193,56 @@ describe("run now", () => {
       (await runNow(new mongoose.Types.ObjectId().toString())).status
     ).toBe(404)
   })
+
+  it("lets only one of several runs created in the same instant onto a device", async () => {
+    await syncDevices()
+    const task = await createTask()
+    const { Run } = await import("@/lib/models/run")
+    await Run.init() // the guard is an index; make sure it is built
+    const { createRun } = await import("@/lib/runs/service")
+
+    // The guard itself: the checks in createRun read before they write, so
+    // the database refuses a second queued run for the device outright.
+    const fields = {
+      taskId: new mongoose.Types.ObjectId(task.id),
+      taskName: "Inbox",
+      deviceSerial: "emulator-5554",
+      trigger: "manual" as const,
+      instruction: "x",
+      options: { vision: false, reasoning: false, maxSteps: 1 },
+    }
+    const first = await Run.create({ ...fields, status: "queued" })
+    await expect(
+      Run.create({ ...fields, status: "queued" })
+    ).rejects.toMatchObject({ code: 11000 })
+    // A finished run no longer holds the device.
+    await Run.updateOne(
+      { _id: first._id },
+      { $set: { status: "cancelled", finishedAt: new Date() } }
+    )
+
+    // Several creations at once, as two schedules on one phone firing
+    // together do: each reads "device free" before any has written its run.
+    const results = await Promise.allSettled(
+      Array.from({ length: 4 }, () =>
+        createRun({
+          taskId: task.id,
+          deviceSerial: "emulator-5554",
+          trigger: "manual",
+        })
+      )
+    )
+    expect(results.filter((r) => r.status === "fulfilled")).toHaveLength(1)
+    for (const r of results)
+      if (r.status === "rejected")
+        expect(String((r.reason as Error).message)).toContain("busy")
+    expect(
+      await Run.countDocuments({
+        deviceSerial: "emulator-5554",
+        status: "queued",
+      })
+    ).toBe(1)
+  })
 })
 
 describe("executeRun", () => {

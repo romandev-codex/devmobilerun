@@ -3,6 +3,7 @@ import mongoose from "mongoose"
 
 import { connectDb } from "@/lib/db"
 import { reconcileOnBoot } from "@/lib/jobs/reconcile"
+import { Run } from "@/lib/models/run"
 import {
   DEVICE_DISPATCH_EVERY,
   DEVICE_DISPATCH_JOB,
@@ -101,6 +102,12 @@ export function startAgenda(): Promise<void> {
   if (!globalForAgenda.__agendaStarted) {
     globalForAgenda.__agendaStarted = getAgenda()
       .then(async (agenda) => {
+        // The "one queued run per device" index is what stops two schedules
+        // firing together from both starting a run: have it in place before
+        // any tick can fire, and say so when it could not be built.
+        await Run.init().catch((err: unknown) =>
+          console.error("[agenda] could not build run indexes", err)
+        )
         const report = await reconcileOnBoot()
         const planned = await reconcileSchedules()
         if (planned) console.warn("[agenda] re-planned schedules", planned)

@@ -87,6 +87,18 @@ const runSchema = new Schema(
 
 runSchema.index({ taskId: 1, createdAt: -1 })
 runSchema.index({ deviceSerial: 1, _id: -1 })
+// One device runs one task at a time. `createRun` reads before it writes, so
+// two runs created in the same instant (two schedules on one phone firing
+// together) both see the device as free; this index refuses the second insert
+// and `createRun` turns that into its usual "busy" conflict.
+runSchema.index(
+  { deviceSerial: 1 },
+  {
+    name: "one_queued_run_per_device",
+    unique: true,
+    partialFilterExpression: { status: "queued" },
+  }
+)
 
 export type RunDoc = InferSchemaType<typeof runSchema> & {
   _id: mongoose.Types.ObjectId

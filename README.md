@@ -114,7 +114,8 @@ npm run check                   # typecheck + lint + both test suites
    executor is unreachable the stop fails rather than pretending the phone stopped.
 6. Schedules re-plan the next tick from the end of each run, wait (retrying within seconds, without recording
    anything) while the device is busy with another run or offline, and disable themselves at their max run count.
-   One device runs one task at a time: a run queued for a device counts as holding it.
+   One device runs one task at a time: a run queued for a device counts as holding it, and a unique index on
+   queued runs makes sure two schedules firing in the same instant cannot both start.
 7. After a server restart, in-flight runs reattach to the executor's stream from the last stored event; a run is
    marked lost only when the executor no longer knows it. Scheduled runs finished this way still count toward
    their schedule.

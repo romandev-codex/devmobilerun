@@ -632,6 +632,43 @@ describe("schedules", () => {
     await patch(id, { enabled: false })
   })
 
+  it("two schedules on one device firing together start one run; the other waits", async () => {
+    const a = (
+      await create({
+        taskId: await task("together-1"),
+        deviceSerial: "A",
+        intervalSeconds: 3600,
+      })
+    ).body.schedule.id as string
+    const b = (
+      await create({
+        taskId: await task("together-2"),
+        deviceSerial: "A",
+        intervalSeconds: 3600,
+      })
+    ).body.schedule.id as string
+    const { Run } = await import("@/lib/models/run")
+    await Run.init() // the guard against both starting is an index
+    await Promise.all([tick(a), tick(b)])
+
+    // Both ticks read the device as free at the same moment. One ran; the
+    // other recorded nothing (no failed "device busy" row) and stays due, so
+    // it takes the device as soon as the first run frees it.
+    const runs = await Run.find({
+      scheduleId: { $in: [a, b].map((id) => new mongoose.Types.ObjectId(id)) },
+    }).lean()
+    expect(runs.map((r) => r.status)).toEqual(["succeeded"])
+    const [ranId, waitedId] =
+      runs[0].scheduleId!.toString() === a ? [a, b] : [b, a]
+    expect((await get(ranId)).runCount).toBe(1)
+    const waited = await get(waitedId)
+    expect(waited.runCount).toBe(0)
+    expect(waited.enabled).toBe(true)
+    expect(new Date(waited.nextRunAt).getTime()).toBeLessThanOrEqual(Date.now())
+    expect(await pendingTicks(waitedId)).toBe(1)
+    await stop(a, b)
+  })
+
   it("still records a skip when the task cannot start for another reason", async () => {
     const t = await task("race-other")
     const { body } = await create({

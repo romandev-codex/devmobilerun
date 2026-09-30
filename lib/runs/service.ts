@@ -138,6 +138,15 @@ export const runNowSchema = z.object({
 
 const BUSY_SUFFIX = "is busy with another run"
 
+/** The unique index on queued runs refused the insert: E11000 from the driver. */
+function isDuplicateKeyError(err: unknown): boolean {
+  return (
+    typeof err === "object" &&
+    err !== null &&
+    (err as { code?: unknown }).code === 11000
+  )
+}
+
 /** The refusal `createRun` raises for a device that already has a run. */
 export function isDeviceBusyError(err: unknown): boolean {
   return (
@@ -227,6 +236,10 @@ export async function createRun(input: {
   } catch (err) {
     if (record)
       await undoRecord(record.channel, record.id).catch(() => undefined)
+    // Another run for this device was inserted between the check above and
+    // this write; the index caught it, so refuse it like any busy device.
+    if (isDuplicateKeyError(err))
+      throw conflict(`Device ${input.deviceSerial} ${BUSY_SUFFIX}`)
     throw err
   }
 }
