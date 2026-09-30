@@ -10,6 +10,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table"
+import { runOutcome } from "@/lib/run-status"
 import type { RunView } from "@/lib/runs/service"
 
 export function RunTable({
@@ -45,7 +46,7 @@ export function RunTable({
           <TableRow key={r.id}>
             <TableCell>
               <Link href={`/runs/${r.id}`}>
-                <RunStatusBadge status={r.status} />
+                <RunStatusBadge status={runOutcome(r)} />
               </Link>
             </TableCell>
             {showTask ? (

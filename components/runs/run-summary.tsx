@@ -2,6 +2,7 @@ import Link from "next/link"
 
 import { RunStatusBadge } from "@/components/runs/run-status-badge"
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
+import { runOutcome } from "@/lib/run-status"
 import type { RunView } from "@/lib/runs/service"
 
 export function formatDuration(
@@ -22,6 +23,19 @@ export function RunResultBanner({ run }: { run: RunView }) {
         <AlertTitle>Succeeded in {run.result.steps} steps</AlertTitle>
         <AlertDescription>
           {run.result.reason || "No reason given."}
+        </AlertDescription>
+      </Alert>
+    )
+  }
+  if (runOutcome(run) === "step-limit") {
+    return (
+      <Alert>
+        <AlertTitle>
+          Reached the step limit after {run.result?.steps} steps
+        </AlertTitle>
+        <AlertDescription>
+          The agent was still working when its budget of {run.options.maxSteps}{" "}
+          steps ran out.
         </AlertDescription>
       </Alert>
     )
@@ -82,7 +96,7 @@ export function RunMeta({
     <dl className="grid grid-cols-[max-content_1fr] gap-x-4 gap-y-1 text-sm">
       <dt className="text-muted-foreground">Status</dt>
       <dd>
-        <RunStatusBadge status={run.status} />
+        <RunStatusBadge status={runOutcome(run)} />
       </dd>
       <dt className="text-muted-foreground">Task</dt>
       <dd>

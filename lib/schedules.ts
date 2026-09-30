@@ -9,6 +9,7 @@ import { deviceCooldownUntil } from "@/lib/device-thermal"
 import { syncDevices } from "@/lib/devices"
 import { Device } from "@/lib/models/device"
 import { Run } from "@/lib/models/run"
+import { ranOutOfSteps, runOutcome } from "@/lib/run-status"
 import {
   Schedule,
   SCHEDULE_MODES,
@@ -55,6 +56,7 @@ export type ScheduleView = {
   failStreak: number
   lastRunId: string | null
   lastRunAt: string | null
+  /** Outcome of the last run (`runOutcome`), so a step-limit stop is not shown as a failure. */
   lastRunStatus: string | null
   nextRunAt: string | null
   createdAt: string
@@ -153,12 +155,19 @@ async function relatedFor(docs: ScheduleDoc[]): Promise<Related> {
       .select("name")
       .lean<{ _id: mongoose.Types.ObjectId; name: string }[]>(),
     Run.find({ _id: { $in: runIds } })
-      .select("status")
-      .lean<{ _id: mongoose.Types.ObjectId; status: string }[]>(),
+      .select("status result options")
+      .lean<
+        {
+          _id: mongoose.Types.ObjectId
+          status: string
+          result?: { success?: boolean; steps?: number } | null
+          options?: { maxSteps?: number } | null
+        }[]
+      >(),
   ])
   return {
     taskNames: new Map(tasks.map((t) => [t._id.toString(), t.name])),
-    runStatuses: new Map(runs.map((r) => [r._id.toString(), r.status])),
+    runStatuses: new Map(runs.map((r) => [r._id.toString(), runOutcome(r)])),
   }
 }
 
@@ -641,23 +650,6 @@ export async function executeScheduleTick(scheduleId: string): Promise<void> {
       )
     )
   }
-}
-
-/**
- * A run that merely ran out of steps did not fail the way `maxFails` is meant
- * to catch: the agent was still working when its step budget ended. The agent
- * stops as soon as `step_number >= max_steps`, so the final step count reaching
- * the run's own budget is what identifies that stop.
- */
-function ranOutOfSteps(run: {
-  result?: { success?: boolean; steps?: number } | null
-  options?: { maxSteps?: number } | null
-}): boolean {
-  const steps = run.result?.steps
-  const maxSteps = run.options?.maxSteps
-  if (run.result?.success !== false || steps == null || maxSteps == null)
-    return false
-  return maxSteps > 0 && steps >= maxSteps
 }
 
 /**

@@ -9,6 +9,7 @@ import { DB_CHANNEL_NAME_RE } from "@/lib/models/db-channel"
 import { Run } from "@/lib/models/run"
 import { Schedule } from "@/lib/models/schedule"
 import { Task, type TaskDoc } from "@/lib/models/task"
+import { runOutcome } from "@/lib/run-status"
 import { deleteTaskMemory } from "@/lib/task-memory"
 
 const asObjectId = (id: string, what = "Task") => toObjectId(id, what)
@@ -163,6 +164,8 @@ type LastRunRow = {
   _id: mongoose.Types.ObjectId
   runId: mongoose.Types.ObjectId
   status: string
+  result?: { success?: boolean; steps?: number } | null
+  options?: { maxSteps?: number } | null
   at: Date
 }
 type CountRow = { _id: mongoose.Types.ObjectId; n: number }
@@ -178,6 +181,8 @@ async function taskRelations(ids: mongoose.Types.ObjectId[]) {
           _id: "$taskId",
           runId: { $first: "$_id" },
           status: { $first: "$status" },
+          result: { $first: "$result" },
+          options: { $first: "$options" },
           at: { $first: "$createdAt" },
         },
       },
@@ -204,7 +209,7 @@ function withRelations(
     lastRun: last
       ? {
           id: last.runId.toString(),
-          status: last.status,
+          status: runOutcome(last),
           at: last.at.toISOString(),
         }
       : null,

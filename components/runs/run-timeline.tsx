@@ -11,7 +11,7 @@ import {
   countElements,
   formatElements,
 } from "@/lib/runs/ui-elements"
-import { isTerminal } from "@/lib/run-status"
+import { isTerminal, runOutcome } from "@/lib/run-status"
 import { cn } from "@/lib/utils"
 
 type Payload = Record<string, unknown>
@@ -286,7 +286,7 @@ export function RunTimeline({
         <h2 className="text-sm font-medium">Timeline</h2>
         <span className="flex items-center gap-2 text-xs text-muted-foreground">
           {!isTerminal(run.status) ? <StopRunButton runId={run.id} /> : null}
-          <RunStatusBadge status={run.status} />
+          <RunStatusBadge status={runOutcome(run)} />
           {connection === "live"
             ? "live"
             : connection === "connecting"
