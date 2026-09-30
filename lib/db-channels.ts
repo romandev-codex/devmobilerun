@@ -100,19 +100,9 @@ export const bulkRecordsSchema = z.discriminatedUnion("action", [
 
 export type BulkRecordsInput = z.infer<typeof bulkRecordsSchema>
 
-export const EXPORT_SHAPES = ["records", "data"] as const
-export const EXPORT_FORMATS = ["json", "ndjson"] as const
-export type ExportShape = (typeof EXPORT_SHAPES)[number]
-export type ExportFormat = (typeof EXPORT_FORMATS)[number]
-
-/**
- * Export query. `shape=data` emits only each record's `data` object, which the
- * import panel accepts as is; `shape=records` emits the full record view.
- */
+/** Export query: optionally one status. The output is the import format. */
 export const exportRecordsSchema = z.object({
   status: recordStatusSchema.optional(),
-  shape: z.enum(EXPORT_SHAPES).default("records"),
-  format: z.enum(EXPORT_FORMATS).default("json"),
 })
 
 export type ExportRecordsQuery = z.infer<typeof exportRecordsSchema>
@@ -494,28 +484,33 @@ export async function listRecords(
 }
 
 /**
- * Every record of a channel in queue (FIFO) order, as an async iterable backed
- * by a database cursor so a large channel never sits in memory at once. The
- * channel is checked before the first item, so a 404 surfaces as an error and
- * not as a broken download.
+ * Each record's `data` object, in queue (FIFO) order, as an async iterable
+ * backed by a database cursor so a large channel never sits in memory at
+ * once. The output is exactly what `addRecords` accepts, so an export can be
+ * imported into another channel. The channel is checked before the first
+ * item, so a 404 surfaces as an error and not as a broken download.
  */
 export async function exportRecords(
   channel: string,
   query: unknown
-): Promise<{ query: ExportRecordsQuery; records: AsyncIterable<RecordView> }> {
+): Promise<{
+  query: ExportRecordsQuery
+  objects: AsyncIterable<Record<string, unknown>>
+}> {
   const q = exportRecordsSchema.parse(query)
   await connectDb()
   await ensureChannel(channel)
   const filter: Record<string, unknown> = { channel }
   if (q.status) filter.status = q.status
-  const cursor = DbRecord.find(filter)
+  const cursor = DbRecord.find(filter, { data: 1 })
     .sort({ _id: 1 })
-    .lean<DbRecordDoc>()
+    .lean<Pick<DbRecordDoc, "data">>()
     .cursor()
-  async function* iterate(): AsyncIterable<RecordView> {
-    for await (const doc of cursor) yield toRecordView(doc as DbRecordDoc)
+  async function* iterate(): AsyncIterable<Record<string, unknown>> {
+    for await (const doc of cursor)
+      yield (doc.data ?? {}) as Record<string, unknown>
   }
-  return { query: q, records: iterate() }
+  return { query: q, objects: iterate() }
 }
 
 export async function getRecord(

@@ -400,7 +400,7 @@ describe("db records (operator API)", () => {
     expect((await bulk("missing-12", { action: "clear" })).status).toBe(404)
   })
 
-  it("exports a channel as a JSON array in queue order", async () => {
+  it("exports the records' data as a JSON array in queue order", async () => {
     await createChannel({ name: "export-15" })
     const { body } = await add("export-15", [{ n: 1 }, { n: 2 }])
     await add("export-15", [{ n: 3 }])
@@ -412,55 +412,37 @@ describe("db records (operator API)", () => {
     expect(res.headers.get("content-disposition")).toBe(
       'attachment; filename="export-15.json"'
     )
-    const records = JSON.parse(res.text)
-    expect(records.map((r: { data: { n: number } }) => r.data.n)).toEqual([
-      1, 2, 3,
-    ])
-    expect(records[0]).toMatchObject({
-      id: body.records[0].id,
-      channel: "export-15",
-      status: "done",
-      result: null,
-    })
+    // Only the data objects, no ids or statuses, oldest first.
+    expect(JSON.parse(res.text)).toEqual([{ n: 1 }, { n: 2 }, { n: 3 }])
 
     const empty = await exportRecords("export-15", { status: "failed" })
     expect(empty.status).toBe(200)
     expect(JSON.parse(empty.text)).toEqual([])
   })
 
-  it("exports data only, filtered by status, as JSON or NDJSON", async () => {
+  it("exports one status and imports unchanged into another channel", async () => {
     await createChannel({ name: "export-16" })
+    await createChannel({ name: "export-16-copy" })
     const { body } = await add("export-16", [{ n: 1 }, { n: 2 }, { n: 3 }])
     await record("PATCH", "export-16", body.records[1].id, { status: "failed" })
 
-    const data = await exportRecords("export-16", {
-      shape: "data",
-      status: "pending",
-    })
-    expect(data.headers.get("content-disposition")).toBe(
-      'attachment; filename="export-16-pending-data.json"'
+    const failed = await exportRecords("export-16", { status: "failed" })
+    expect(failed.headers.get("content-disposition")).toBe(
+      'attachment; filename="export-16-failed.json"'
     )
-    expect(JSON.parse(data.text)).toEqual([{ n: 1 }, { n: 3 }])
-    // The data-only export round-trips through import unchanged.
-    const imported = await importRecords("export-16", JSON.parse(data.text))
-    expect(imported.status).toBe(201)
-    expect(imported.body.records.map((r: { data: unknown }) => r.data)).toEqual(
-      [{ n: 1 }, { n: 3 }]
-    )
+    expect(JSON.parse(failed.text)).toEqual([{ n: 2 }])
 
-    const ndjson = await exportRecords("export-16", {
-      format: "ndjson",
-      shape: "data",
-    })
-    expect(ndjson.headers.get("content-type")).toContain("application/x-ndjson")
-    expect(ndjson.headers.get("content-disposition")).toBe(
-      'attachment; filename="export-16-data.ndjson"'
+    const imported = await importRecords(
+      "export-16-copy",
+      JSON.parse(failed.text)
     )
-    const lines = ndjson.text
-      .trimEnd()
-      .split("\n")
-      .map((l) => JSON.parse(l))
-    expect(lines).toEqual([{ n: 1 }, { n: 2 }, { n: 3 }, { n: 1 }, { n: 3 }])
+    expect(imported.status).toBe(201)
+    expect(imported.body.records).toHaveLength(1)
+    expect(imported.body.records[0]).toMatchObject({
+      channel: "export-16-copy",
+      status: "pending",
+      data: { n: 2 },
+    })
   })
 
   it("rejects an unknown channel or a bad export query before streaming", async () => {
@@ -472,9 +454,6 @@ describe("db records (operator API)", () => {
     const bad = await exportRecords("export-17", { status: "weird" })
     expect(bad.status).toBe(400)
     expect(JSON.parse(bad.text).error.code).toBe("validation_error")
-    expect((await exportRecords("export-17", { format: "csv" })).status).toBe(
-      400
-    )
   })
 })
 

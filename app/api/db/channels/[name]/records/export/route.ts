@@ -1,57 +1,30 @@
 import { requireDbToken } from "@/lib/api/db-auth"
 import { route } from "@/lib/api/route"
-import {
-  exportRecords,
-  type ExportRecordsQuery,
-  type RecordView,
-} from "@/lib/db-channels"
+import { exportRecords } from "@/lib/db-channels"
 
 type Ctx = { params: Promise<{ name: string }> }
 
-const CONTENT_TYPES: Record<ExportRecordsQuery["format"], string> = {
-  json: "application/json; charset=utf-8",
-  ndjson: "application/x-ndjson; charset=utf-8",
-}
-
-/** `<channel>.json`, `<channel>-failed.json`, `<channel>-data.ndjson`, ... */
-function exportFileName(name: string, q: ExportRecordsQuery): string {
-  const parts = [name]
-  if (q.status) parts.push(q.status)
-  if (q.shape === "data") parts.push("data")
-  return `${parts.join("-")}.${q.format}`
-}
-
-/**
- * Streams the records as one download. `json` is an array, `ndjson` is one
- * object per line; both list records oldest first, the order workers see.
- */
+/** Streams `[\n{...},\n{...}\n]`: a JSON array of the records' data objects. */
 function body(
-  records: AsyncIterable<RecordView>,
-  q: ExportRecordsQuery
+  objects: AsyncIterable<Record<string, unknown>>
 ): ReadableStream<Uint8Array> {
   const encoder = new TextEncoder()
-  const item = (r: RecordView) =>
-    JSON.stringify(q.shape === "data" ? r.data : r)
-  const iterator = records[Symbol.asyncIterator]()
+  const iterator = objects[Symbol.asyncIterator]()
   let count = 0
   return new ReadableStream<Uint8Array>({
-    async start(controller) {
-      if (q.format === "json") controller.enqueue(encoder.encode("["))
+    start(controller) {
+      controller.enqueue(encoder.encode("["))
     },
     async pull(controller) {
       const next = await iterator.next()
       if (next.done) {
-        if (q.format === "json")
-          controller.enqueue(encoder.encode(count > 0 ? "\n]\n" : "]\n"))
+        controller.enqueue(encoder.encode(count > 0 ? "\n]\n" : "]\n"))
         controller.close()
         return
       }
-      const text =
-        q.format === "json"
-          ? `${count > 0 ? ",\n" : "\n"}${item(next.value)}`
-          : `${item(next.value)}\n`
+      const sep = count > 0 ? ",\n" : "\n"
       count++
-      controller.enqueue(encoder.encode(text))
+      controller.enqueue(encoder.encode(sep + JSON.stringify(next.value)))
     },
     async cancel() {
       await iterator.return?.()
@@ -60,19 +33,20 @@ function body(
 }
 
 /**
- * Query: `status` (optional filter), `shape` (`records`, the default, or
- * `data` for just the stored objects, ready for re-import) and `format`
- * (`json`, the default, or `ndjson`). Responds with an attachment.
+ * Downloads the channel's records as a JSON array of their `data` objects,
+ * oldest first, in the same shape the import accepts. `status` filters to one
+ * status. File name: `{name}.json` or `{name}-{status}.json`.
  */
 export const GET = route<Ctx>(async (req, { params }) => {
   requireDbToken(req)
   const { name } = await params
   const raw = Object.fromEntries(new URL(req.url).searchParams.entries())
-  const { query, records } = await exportRecords(name, raw)
-  return new Response(body(records, query), {
+  const { query, objects } = await exportRecords(name, raw)
+  const file = `${name}${query.status ? `-${query.status}` : ""}.json`
+  return new Response(body(objects), {
     headers: {
-      "content-type": CONTENT_TYPES[query.format],
-      "content-disposition": `attachment; filename="${exportFileName(name, query)}"`,
+      "content-type": "application/json; charset=utf-8",
+      "content-disposition": `attachment; filename="${file}"`,
       "cache-control": "no-store",
     },
   })

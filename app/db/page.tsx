@@ -10,7 +10,7 @@ export default async function DbPage() {
   return (
     <div>
       <PageHeader
-        title="DB"
+        title="Database"
         description="Named queues of JSON records that external workers pull from over HTTP."
         actions={<NewChannelButton />}
       />
