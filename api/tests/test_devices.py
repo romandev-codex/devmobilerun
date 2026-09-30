@@ -285,6 +285,7 @@ async def test_switch_user_waits_until_the_user_is_current_and_unlocked(fast_swi
         {
             "settings --user": [""],
             "am switch-user": [""],
+            "input keyevent": [""],
             "am get-current-user": ["0", "10"],
             "am get-started-user-state": ["RUNNING_LOCKED", "RUNNING_UNLOCKED"],
         }
@@ -298,10 +299,14 @@ async def test_switch_user_waits_until_the_user_is_current_and_unlocked(fast_swi
         ["settings", "--user", "10", "put", "system", "systemui.guest_has_logged_in", "0"],
         ["am", "switch-user", "-w", "10"],
     ]
-    # Polled until both the foreground and the unlocked state agreed.
+    # Polled until both the foreground and the unlocked state agreed, then HOME
+    # woke the device after the settle pause.
     states = [c for c in shell.calls if c[:2] == ["am", "get-started-user-state"]]
     assert len(states) == 2
-    assert shell.calls[-1] == ["am", "get-started-user-state", "10"]
+    assert shell.calls[-2:] == [
+        ["am", "get-started-user-state", "10"],
+        ["input", "keyevent", "KEYCODE_HOME"],
+    ]
 
 
 async def test_switch_user_falls_back_without_the_wait_flag_and_to_pm_running(fast_switch):
@@ -311,6 +316,7 @@ async def test_switch_user_falls_back_without_the_wait_flag_and_to_pm_running(fa
         {
             "settings --user": [""],
             "am switch-user": ["Error: Unknown option: -w", ""],
+            "input keyevent": [""],
             "am get-current-user": ["10"],
             "am get-started-user-state": ["Error: unknown command 'get-started-user-state'"],
             "pm list": ["Users:\n\tUserInfo{0:Owner:c13} running\n\tUserInfo{10:Work:c10}\n",

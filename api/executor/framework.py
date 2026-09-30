@@ -100,7 +100,8 @@ SWITCH_USER_POLL_SECONDS = 1.0
 PORTAL_VERSION_TIMEOUT_SECONDS = 10.0
 PORTAL_VERSION_POLL_SECONDS = 1.0
 #: Pause after the user is unlocked, for the launcher and the profile's apps to
-#: come up before HOME is pressed. Only paid when the device actually switched.
+#: come up. HOME is pressed right after it: the screen may have fallen asleep
+#: during the wait. Only paid when the device actually switched.
 SWITCH_USER_SETTLE_SECONDS = 30.0
 #: SystemUI's per-user setting behind the "Welcome back, guest?" resume dialog.
 GUEST_LOGGED_IN_SETTING = "systemui.guest_has_logged_in"
@@ -386,6 +387,9 @@ class MobilerunFramework:
             if await self._current_user(serial) == user_id and await self._user_unlocked(serial, user_id):
                 multiuser.note_current_user(serial, user_id)
                 await asyncio.sleep(SWITCH_USER_SETTLE_SECONDS)
+                # The screen may have gone to sleep while the profile settled;
+                # HOME wakes it and lands on the new user's home screen.
+                await self._shell(serial, ["input", "keyevent", "KEYCODE_HOME"])
                 return
             if asyncio.get_running_loop().time() >= deadline:
                 raise DeviceUserError(
