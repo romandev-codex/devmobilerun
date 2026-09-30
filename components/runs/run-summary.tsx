@@ -113,12 +113,12 @@ export function RunMeta({
           {deviceName}
         </Link>
       </dd>
-      {run.deviceUser ? (
-        <>
-          <dt className="text-muted-foreground">Profile</dt>
-          <dd>{run.deviceUser}</dd>
-        </>
-      ) : null}
+      <dt className="text-muted-foreground">Profile</dt>
+      <dd>
+        {run.deviceUser ?? (
+          <span className="text-muted-foreground">active</span>
+        )}
+      </dd>
       <dt className="text-muted-foreground">Trigger</dt>
       <dd>{run.trigger}</dd>
       <dt className="text-muted-foreground">Started</dt>
