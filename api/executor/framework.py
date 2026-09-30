@@ -102,7 +102,7 @@ PORTAL_VERSION_POLL_SECONDS = 1.0
 #: Pause after the user is unlocked, for the launcher and the profile's apps to
 #: come up. HOME is pressed right after it: the screen may have fallen asleep
 #: during the wait. Only paid when the device actually switched.
-SWITCH_USER_SETTLE_SECONDS = 30.0
+SWITCH_USER_SETTLE_SECONDS = 10.0
 #: SystemUI's per-user setting behind the "Welcome back, guest?" resume dialog.
 GUEST_LOGGED_IN_SETTING = "systemui.guest_has_logged_in"
 
