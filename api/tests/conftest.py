@@ -14,6 +14,8 @@ from executor.framework import (
     DeviceUser,
     DeviceUserError,
     LlmProfile,
+    PortalInstall,
+    PortalInstallError,
     RunSpec,
 )
 from executor.main import create_app
@@ -49,6 +51,9 @@ class FakeFramework:
         self.next_user_id = 11
         # When set, creating or switching a user fails with this message.
         self.user_error: str | None = None
+        self.installed_portals: list[tuple[str, int]] = []
+        # When set, installing the Portal fails with this message.
+        self.portal_error: str | None = None
         # Battery temperature per serial (°C); None means the device has no usable sensor.
         self.temperatures: dict[str, float | None] = {"emulator-5554": 31.2}
         self.specs: list[RunSpec] = []
@@ -116,6 +121,13 @@ class FakeFramework:
             raise DeviceUserError(self.user_error)
         self.users[serial] = [u for u in self.users.get(serial, []) if u.id != user_id]
         self.removed_users.append((serial, user_id))
+
+    async def install_portal(self, serial: str, user_id: int) -> PortalInstall:
+        self._require_online(serial)
+        if self.portal_error:
+            raise PortalInstallError(self.portal_error)
+        self.installed_portals.append((serial, user_id))
+        return PortalInstall(user_id=user_id, version="1.0.0-fake", accessibility_enabled=True)
 
     async def open_url(self, serial: str, url: str) -> None:
         self.opened_urls.append((serial, url))

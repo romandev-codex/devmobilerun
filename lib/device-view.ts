@@ -31,6 +31,14 @@ export type DeviceUserView = {
   current: boolean
 }
 
+/** The Mobilerun Portal as installed into one profile, as the portal route reports it. */
+export type DevicePortalInstallView = {
+  userId: number
+  /** The version the Portal reports once installed; null when it could not be read. */
+  version: string | null
+  accessibilityEnabled: boolean
+}
+
 export function deviceLabel(
   d: Pick<DeviceView, "displayName" | "model" | "serial">
 ): string {

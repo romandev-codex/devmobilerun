@@ -7,6 +7,7 @@ protocol so tests can substitute a scripted fake at the HTTP seam.
 from __future__ import annotations
 
 import base64
+import json
 import re
 from dataclasses import dataclass, field, replace
 from typing import Any, AsyncIterator, Protocol
@@ -55,6 +56,16 @@ class DeviceUser:
 
 
 @dataclass(frozen=True)
+class PortalInstall:
+    """The outcome of installing the Mobilerun Portal into one Android user."""
+
+    user_id: int
+    """The version the Portal reports once installed; None when it could not be read."""
+    version: str | None
+    accessibility_enabled: bool
+
+
+@dataclass(frozen=True)
 class RunSpec:
     run_id: str
     device_serial: str
@@ -85,6 +96,9 @@ class RunSpec:
 #: switch to a new user boots that user, which takes a while on real phones.
 SWITCH_USER_TIMEOUT_SECONDS = 120.0
 SWITCH_USER_POLL_SECONDS = 1.0
+#: How long to wait for a freshly installed Portal to answer with its version.
+PORTAL_VERSION_TIMEOUT_SECONDS = 10.0
+PORTAL_VERSION_POLL_SECONDS = 1.0
 #: Pause after the user is unlocked, for the launcher to come up before HOME is pressed.
 SWITCH_USER_SETTLE_SECONDS = 2.0
 
@@ -99,6 +113,30 @@ class DeviceNotFound(Exception):
 
 class DeviceUserError(Exception):
     """Raised when the device refuses to create or switch to a user; carries adb's message."""
+
+
+class PortalInstallError(Exception):
+    """Raised when the Portal APK cannot be fetched or installed; carries the cause."""
+
+
+def parse_portal_version(output: str) -> str | None:
+    """Reads the Portal's version from its ``content query --uri .../version`` output.
+
+    The provider answers ``Row: 0 result={"status":"success","result":"1.0.0"}``;
+    older builds answer ``Row: 0 version=1.0.0``. Anything else (a stopped
+    user, a provider that is not up yet) reads as no version.
+    """
+    match = re.search(r"result=(\{.*\})", output)
+    if match:
+        try:
+            data = json.loads(match.group(1))
+        except ValueError:
+            data = None
+        if isinstance(data, dict) and data.get("status") == "success":
+            value = data.get("result") or data.get("data")
+            return str(value) if value else None
+    match = re.search(r"\bversion=([\w.\-+]+)", output)
+    return match.group(1) if match else None
 
 
 class DeviceUserNotFound(Exception):
@@ -196,6 +234,8 @@ class Framework(Protocol):
     async def switch_user(self, serial: str, user_id: int) -> None: ...
 
     async def remove_user(self, serial: str, user_id: int) -> None: ...
+
+    async def install_portal(self, serial: str, user_id: int) -> PortalInstall: ...
 
     async def open_url(self, serial: str, url: str) -> None: ...
 
@@ -350,6 +390,89 @@ class MobilerunFramework:
             users = parse_user_list(await self._shell(serial, ["pm", "list", "users"]), user_id)
             return any(u.id == user_id and u.running for u in users)
         return "RUNNING_UNLOCKED" in output
+
+    async def install_portal(self, serial: str, user_id: int) -> PortalInstall:
+        """Installs (or reinstalls) the Mobilerun Portal for one Android user.
+
+        The APK is the one ``mobilerun setup`` would pick for the installed
+        framework version. It is installed with ``pm install --user`` so the
+        other users on the phone keep whatever they have, and the accessibility
+        service is enabled for that user only, since the setting is per user.
+        """
+        import asyncio
+        import contextlib
+
+        from async_adbutils import adb
+        from async_adbutils.errors import AdbError
+        from mobilerun_core_local import __version__ as core_version
+        from mobilerun_core_local.driver.android.portal import (
+            A11Y_SERVICE_NAME,
+            PORTAL_PACKAGE_NAME,
+            download_portal_apk,
+            download_versioned_portal_apk,
+            get_compatible_portal_version,
+            portal_content_uri,
+        )
+
+        uid = str(user_id)
+
+        def fetch_apk(stack: contextlib.ExitStack) -> str:
+            version, download_base, _ = get_compatible_portal_version(core_version)
+            apk = (
+                download_versioned_portal_apk(version, download_base)
+                if version
+                else download_portal_apk()
+            )
+            return stack.enter_context(apk)
+
+        with contextlib.ExitStack() as stack:
+            try:
+                # The download is blocking (requests); keep the event loop free.
+                apk_path = await asyncio.to_thread(fetch_apk, stack)
+            except Exception as exc:  # whatever failed, the caller needs the reason
+                raise PortalInstallError(f"Could not download the Portal APK: {exc}") from exc
+            try:
+                device = await adb.device(serial=serial)
+                await device.install(
+                    apk_path,
+                    nolaunch=True,
+                    silent=True,
+                    flags=["-r", "-g", "-d", "--user", uid],
+                )
+            except AdbError as exc:
+                if _device_is_gone(exc):
+                    raise DeviceNotFound(serial) from exc
+                raise PortalInstallError(f"Portal installation failed: {exc}") from exc
+
+        for setting, value in (
+            ("enabled_accessibility_services", A11Y_SERVICE_NAME),
+            ("accessibility_enabled", "1"),
+        ):
+            await self._shell(serial, ["settings", "--user", uid, "put", "secure", setting, value])
+        enabled = await self._shell(
+            serial, ["settings", "--user", uid, "get", "secure", "enabled_accessibility_services"]
+        )
+        accessibility_enabled = A11Y_SERVICE_NAME in enabled
+
+        # The version is read from the Portal's content provider, which comes up
+        # once the accessibility service starts; give it a moment.
+        version: str | None = None
+        query = [
+            "content", "query", "--user", uid,
+            "--uri", portal_content_uri(PORTAL_PACKAGE_NAME, "version"),
+        ]
+        deadline = asyncio.get_running_loop().time() + PORTAL_VERSION_TIMEOUT_SECONDS
+        while version is None:
+            try:
+                version = parse_portal_version(await self._shell(serial, query))
+            except AdbError:  # the provider is not up yet
+                version = None
+            if version is not None or asyncio.get_running_loop().time() >= deadline:
+                break
+            await asyncio.sleep(PORTAL_VERSION_POLL_SECONDS)
+        return PortalInstall(
+            user_id=user_id, version=version, accessibility_enabled=accessibility_enabled
+        )
 
     async def open_url(self, serial: str, url: str) -> None:
         from async_adbutils import adb

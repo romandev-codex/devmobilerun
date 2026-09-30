@@ -38,6 +38,14 @@ export type ExecutorDeviceUser = {
   current: boolean
 }
 
+/** The Mobilerun Portal as installed into one Android user (profile). */
+export type ExecutorPortalInstall = {
+  userId: number
+  /** The version the Portal reports once installed; null when it could not be read. */
+  version: string | null
+  accessibilityEnabled: boolean
+}
+
 export type StartRunRequest = {
   runId: string
   deviceSerial: string

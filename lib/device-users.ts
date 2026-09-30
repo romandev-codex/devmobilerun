@@ -1,7 +1,7 @@
 import { z } from "zod"
 
 import { ApiError, notFound } from "@/lib/api/errors"
-import type { DeviceUserView } from "@/lib/device-view"
+import type { DevicePortalInstallView, DeviceUserView } from "@/lib/device-view"
 import { connectDb } from "@/lib/db"
 import { executor, ExecutorError } from "@/lib/executor/client"
 import type { ExecutorDeviceUser } from "@/lib/executor/types"
@@ -73,6 +73,25 @@ export function removeDeviceUser(
       400
     )
   return viaExecutor(() => executor.removeDeviceUser(serial, userId))
+}
+
+/**
+ * Installs or reinstalls the Mobilerun Portal app into one user (profile) on the
+ * device and enables its accessibility service there. The executor picks the
+ * Portal build that matches its framework version.
+ */
+export async function installDevicePortal(
+  serial: string,
+  id: string
+): Promise<DevicePortalInstallView> {
+  const userId = z.coerce.number().int().min(0).parse(id)
+  try {
+    return await executor.installDevicePortal(serial, userId)
+  } catch (err) {
+    if (err instanceof ExecutorError && err.code === "not_found")
+      throw notFound("Device")
+    throw err
+  }
 }
 
 /**

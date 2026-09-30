@@ -39,6 +39,20 @@ beforeAll(async () => {
   usersRoute("POST", "/devices/:serial/users", 201)
   usersRoute("POST", "/devices/:serial/users/:id/activate")
   usersRoute("DELETE", "/devices/:serial/users/:id")
+  fake.on(
+    "POST",
+    "/devices/:serial/users/:id/portal",
+    async (req, _res, { json, body }) => {
+      const raw = await body()
+      userCalls.push({
+        method: "POST",
+        path: new URL(req.url ?? "/", "http://fake").pathname,
+        body: raw ? JSON.parse(raw) : null,
+      })
+      if (userFailure) return json(userFailure.body, userFailure.status)
+      json({ userId: 10, version: "1.0.3", accessibilityEnabled: true })
+    }
+  )
 })
 
 afterAll(() => fake.close())
@@ -272,6 +286,40 @@ describe("device users", () => {
       userCtx("emulator-5554", "abc")
     )
     expect(bad.status).toBe(400)
+  })
+
+  it("installs the portal into a user through the executor and rejects bad ids", async () => {
+    userCalls = []
+    const { POST } =
+      await import("@/app/api/devices/[serial]/users/[id]/portal/route")
+    const res = await POST(
+      new Request("http://app/api/devices/emulator-5554/users/10/portal", {
+        method: "POST",
+      }),
+      userCtx("emulator-5554", "10")
+    )
+    expect(res.status).toBe(200)
+    expect((await res.json()).portal).toEqual({
+      userId: 10,
+      version: "1.0.3",
+      accessibilityEnabled: true,
+    })
+    expect(userCalls).toEqual([
+      {
+        method: "POST",
+        path: "/devices/emulator-5554/users/10/portal",
+        body: null,
+      },
+    ])
+
+    const bad = await POST(
+      new Request("http://app/api/devices/emulator-5554/users/abc/portal", {
+        method: "POST",
+      }),
+      userCtx("emulator-5554", "abc")
+    )
+    expect(bad.status).toBe(400)
+    expect(userCalls).toHaveLength(1)
   })
 
   it("removes an additional user and refuses the owner without asking the executor", async () => {

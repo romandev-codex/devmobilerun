@@ -130,6 +130,38 @@ async def test_activate_user_switches_and_returns_the_list(client, framework):
     assert res.json()["error"]["code"] == "device_user_error"
 
 
+async def test_install_portal_installs_into_the_profile_and_reports_it(client, framework):
+    res = await client.post("/devices/emulator-5554/users/10/portal")
+    assert res.status_code == 200
+    assert res.json() == {"userId": 10, "version": "1.0.0-fake", "accessibilityEnabled": True}
+    assert framework.installed_portals == [("emulator-5554", 10)]
+
+    res = await client.post("/devices/emulator-5554/users/99/portal")
+    assert res.status_code == 404
+    assert res.json()["error"]["code"] == "user_not_found"
+    assert (await client.post("/devices/nope/users/0/portal")).status_code == 404
+    assert framework.installed_portals == [("emulator-5554", 10)]
+
+    framework.portal_error = "Portal installation failed: INSTALL_FAILED_USER_RESTRICTED"
+    res = await client.post("/devices/emulator-5554/users/0/portal")
+    assert res.status_code == 502
+    assert res.json()["error"] == {
+        "code": "portal_install_error",
+        "message": "Portal installation failed: INSTALL_FAILED_USER_RESTRICTED",
+    }
+
+
+def test_parse_portal_version_reads_the_content_provider_answer():
+    from executor.framework import parse_portal_version
+
+    row = 'Row: 0 result={"status":"success","result":"1.0.3"}\n'
+    assert parse_portal_version(row) == "1.0.3"
+    assert parse_portal_version("Row: 0 version=0.4.7\n") == "0.4.7"
+    assert parse_portal_version('Row: 0 result={"status":"error"}\n') is None
+    assert parse_portal_version("Error while accessing provider:com.mobilerun.portal\n") is None
+    assert parse_portal_version("") is None
+
+
 def test_parse_user_list_reads_pm_output():
     from executor.framework import DeviceUser, parse_user_list
 

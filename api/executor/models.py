@@ -59,3 +59,11 @@ class DeviceUserResponse(BaseModel):
 
 class CreateDeviceUserRequest(BaseModel):
     name: str = Field(min_length=1, max_length=60)
+
+
+class PortalInstallResponse(BaseModel):
+    """The Mobilerun Portal as installed into one Android user (profile)."""
+
+    userId: int
+    version: str | None = None
+    accessibilityEnabled: bool

@@ -3,12 +3,13 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends, HTTPException, Response
 
 from ..deps import get_framework, require_token
-from ..framework import DeviceNotFound, DeviceUserError, Framework
+from ..framework import DeviceNotFound, DeviceUserError, Framework, PortalInstallError
 from ..models import (
     CreateDeviceUserRequest,
     DeviceResponse,
     DeviceThermalResponse,
     DeviceUserResponse,
+    PortalInstallResponse,
 )
 
 router = APIRouter(dependencies=[Depends(require_token)])
@@ -127,3 +128,30 @@ async def activate_user(
         raise _device_not_found(serial) from None
     except DeviceUserError as exc:
         raise _user_error(exc) from None
+
+
+@router.post("/devices/{serial}/users/{user_id}/portal", response_model=PortalInstallResponse)
+async def install_portal(
+    serial: str, user_id: int, framework: Framework = Depends(get_framework)
+) -> PortalInstallResponse:
+    """Installs or reinstalls the Mobilerun Portal for the user with ``pm install --user``
+    and enables its accessibility service for that user."""
+    try:
+        users = await framework.list_users(serial)
+        if not any(u.id == user_id for u in users):
+            raise HTTPException(
+                status_code=404,
+                detail={"code": "user_not_found", "message": f"Device {serial} has no user {user_id}"},
+            )
+        result = await framework.install_portal(serial, user_id)
+    except DeviceNotFound:
+        raise _device_not_found(serial) from None
+    except PortalInstallError as exc:
+        raise HTTPException(
+            status_code=502, detail={"code": "portal_install_error", "message": str(exc)}
+        ) from None
+    return PortalInstallResponse(
+        userId=result.user_id,
+        version=result.version,
+        accessibilityEnabled=result.accessibility_enabled,
+    )

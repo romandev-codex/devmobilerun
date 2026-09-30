@@ -1,16 +1,17 @@
 "use client"
 
-import { Plus, RefreshCw, Trash2, UserRound } from "lucide-react"
+import { PackagePlus, Plus, RefreshCw, Trash2, UserRound } from "lucide-react"
 import { useEffect, useState } from "react"
 
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { apiFetch, apiJson } from "@/lib/client/api"
-import type { DeviceUserView } from "@/lib/device-view"
+import type { DevicePortalInstallView, DeviceUserView } from "@/lib/device-view"
 import { cn } from "@/lib/utils"
 
 type UsersBody = { users: DeviceUserView[] }
+type PortalBody = { portal: DevicePortalInstallView }
 
 /**
  * The Android users (profiles) on one device, read over adb while the page is
@@ -29,9 +30,16 @@ export function DeviceUsers({
 }) {
   const [users, setUsers] = useState<DeviceUserView[] | null>(null)
   const [error, setError] = useState<string | null>(null)
-  const [busy, setBusy] = useState<"load" | "create" | number | null>(null)
+  const [busy, setBusy] = useState<
+    "load" | "create" | "portal" | number | null
+  >(null)
   const [creating, setCreating] = useState(false)
   const [name, setName] = useState("")
+  /** What the last Portal install into a profile reported. */
+  const [portal, setPortal] = useState<{
+    user: DeviceUserView
+    result: DevicePortalInstallView
+  } | null>(null)
 
   const base = `/api/devices/${encodeURIComponent(serial)}/users`
 
@@ -83,6 +91,20 @@ export function DeviceUsers({
     setBusy(null)
     if (!res.ok) return setError(res.message)
     setUsers(res.body.users)
+  }
+
+  async function installPortal(user: DeviceUserView) {
+    setBusy("portal")
+    setError(null)
+    setPortal(null)
+    const res = await apiJson<PortalBody>(
+      `${base}/${user.id}/portal`,
+      "POST",
+      {}
+    )
+    setBusy(null)
+    if (!res.ok) return setError(res.message)
+    setPortal({ user, result: res.body.portal })
   }
 
   async function create(e: React.FormEvent) {
@@ -184,6 +206,20 @@ export function DeviceUsers({
                 ) : null}
               </span>
               <span className="flex shrink-0 gap-1">
+                {u.current ? (
+                  <Button
+                    type="button"
+                    size="icon-xs"
+                    variant="ghost"
+                    title="Install or reinstall the Mobilerun Portal app in this profile"
+                    disabled={busy !== null}
+                    onClick={() => void installPortal(u)}
+                  >
+                    <PackagePlus
+                      className={cn(busy === "portal" && "animate-pulse")}
+                    />
+                  </Button>
+                ) : null}
                 <Button
                   type="button"
                   size="xs"
@@ -213,6 +249,22 @@ export function DeviceUsers({
             </li>
           ))}
         </ul>
+      ) : null}
+
+      {busy === "portal" ? (
+        <p className="text-xs text-muted-foreground">
+          Downloading and installing the Mobilerun Portal in the active profile…
+        </p>
+      ) : null}
+
+      {portal ? (
+        <p className="text-xs text-muted-foreground">
+          Portal{portal.result.version ? ` ${portal.result.version}` : ""}{" "}
+          installed in profile {portal.user.name || `User ${portal.user.id}`}
+          {portal.result.accessibilityEnabled
+            ? "; accessibility service enabled."
+            : ". Enable its accessibility service in the phone's settings."}
+        </p>
       ) : null}
 
       {error ? <p className="text-xs text-destructive">{error}</p> : null}

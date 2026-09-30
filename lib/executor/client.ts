@@ -6,6 +6,7 @@ import type {
   ExecutorDeviceThermal,
   ExecutorDeviceUser,
   ExecutorHealth,
+  ExecutorPortalInstall,
   StartRunRequest,
 } from "@/lib/executor/types"
 
@@ -132,6 +133,11 @@ export const executor = {
   activateDeviceUser: (serial: string, userId: number) =>
     executorJson<ExecutorDeviceUser[]>(
       `/devices/${encodeURIComponent(serial)}/users/${userId}/activate`,
+      { method: "POST" }
+    ),
+  installDevicePortal: (serial: string, userId: number) =>
+    executorJson<ExecutorPortalInstall>(
+      `/devices/${encodeURIComponent(serial)}/users/${userId}/portal`,
       { method: "POST" }
     ),
   screenshot: async (serial: string): Promise<Uint8Array> => {
