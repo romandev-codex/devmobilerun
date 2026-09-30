@@ -31,6 +31,8 @@ class StartRunRequest(BaseModel):
     runId: str = Field(min_length=1, max_length=64)
     deviceSerial: str = Field(min_length=1)
     instruction: str = Field(min_length=1)
+    """Android user (profile) name to run under; created on the device when missing."""
+    deviceUser: str | None = Field(default=None, max_length=60)
     startUrl: str | None = None
     endInstruction: str | None = None
     options: RunOptions = Field(default_factory=RunOptions)
@@ -52,6 +54,7 @@ async def start_run(body: StartRunRequest, runs: RunManager = Depends(get_run_ma
         run_id=body.runId,
         device_serial=body.deviceSerial,
         instruction=body.instruction,
+        device_user=body.deviceUser.strip() if body.deviceUser and body.deviceUser.strip() else None,
         agent=body.options.agent,
         start_url=body.startUrl,
         end_instruction=body.endInstruction,

@@ -29,6 +29,8 @@ export type RunView = {
   taskName: string
   scheduleId: string | null
   deviceSerial: string
+  /** Android user (profile) the run switched the device to, or null. */
+  deviceUser: string | null
   status: RunStatus
   trigger: "manual" | "schedule"
   instruction: string
@@ -60,6 +62,7 @@ export function toRunView(doc: RunDoc): RunView {
     taskName: doc.taskName,
     scheduleId: doc.scheduleId ? doc.scheduleId.toString() : null,
     deviceSerial: doc.deviceSerial,
+    deviceUser: doc.deviceUser ?? null,
     status: doc.status,
     trigger: doc.trigger,
     instruction: doc.instruction ?? "",
@@ -115,6 +118,7 @@ function runFields(
     taskName: task.name,
     scheduleId: scheduleId ? new mongoose.Types.ObjectId(scheduleId) : null,
     deviceSerial,
+    deviceUser: task.deviceUser,
     instruction,
     startUrl,
     endInstruction,

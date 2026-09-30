@@ -7,7 +7,15 @@ import asyncio
 from typing import AsyncIterator
 
 from executor.events import RunEvent
-from executor.framework import ConfigSummary, DeviceInfo, DeviceNotFound, LlmProfile, RunSpec
+from executor.framework import (
+    ConfigSummary,
+    DeviceInfo,
+    DeviceNotFound,
+    DeviceUser,
+    DeviceUserError,
+    LlmProfile,
+    RunSpec,
+)
 from executor.main import create_app
 from executor.settings import Settings
 
@@ -28,6 +36,18 @@ class FakeFramework:
         ]
         self.opened_urls: list[tuple[str, str]] = []
         self.woken: list[str] = []
+        # Android users per serial; the owner is in the foreground to begin with.
+        self.users: dict[str, list[DeviceUser]] = {
+            "emulator-5554": [
+                DeviceUser(id=0, name="Owner", running=True, current=True),
+                DeviceUser(id=10, name="Work", running=False, current=False),
+            ]
+        }
+        self.created_users: list[tuple[str, str]] = []
+        self.switched_users: list[tuple[str, int]] = []
+        self.next_user_id = 11
+        # When set, creating or switching a user fails with this message.
+        self.user_error: str | None = None
         # Battery temperature per serial (°C); None means the device has no usable sensor.
         self.temperatures: dict[str, float | None] = {"emulator-5554": 31.2}
         self.specs: list[RunSpec] = []
@@ -60,6 +80,34 @@ class FakeFramework:
         if not any(d.serial == serial and d.state == "device" for d in self.devices):
             raise DeviceNotFound(serial)
         return self.temperatures.get(serial)
+
+    def _require_online(self, serial: str) -> None:
+        if not any(d.serial == serial and d.state == "device" for d in self.devices):
+            raise DeviceNotFound(serial)
+
+    async def list_users(self, serial: str) -> list[DeviceUser]:
+        self._require_online(serial)
+        return list(self.users.get(serial, []))
+
+    async def create_user(self, serial: str, name: str) -> DeviceUser:
+        self._require_online(serial)
+        if self.user_error:
+            raise DeviceUserError(self.user_error)
+        user = DeviceUser(id=self.next_user_id, name=name, running=False, current=False)
+        self.next_user_id += 1
+        self.users.setdefault(serial, []).append(user)
+        self.created_users.append((serial, name))
+        return user
+
+    async def switch_user(self, serial: str, user_id: int) -> None:
+        self._require_online(serial)
+        if self.user_error:
+            raise DeviceUserError(self.user_error)
+        self.users[serial] = [
+            DeviceUser(id=u.id, name=u.name, running=u.running or u.id == user_id, current=u.id == user_id)
+            for u in self.users.get(serial, [])
+        ]
+        self.switched_users.append((serial, user_id))
 
     async def open_url(self, serial: str, url: str) -> None:
         self.opened_urls.append((serial, url))

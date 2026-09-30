@@ -73,3 +73,82 @@ def test_parse_battery_temperature_reads_tenths_of_a_degree():
     assert parse_battery_temperature(dump) == 31.2
     assert parse_battery_temperature(dump.replace("temperature: 312", "temperature: 0")) is None
     assert parse_battery_temperature("level: 87\n") is None
+
+
+async def test_users_lists_android_users_with_the_current_one_marked(client):
+    res = await client.get("/devices/emulator-5554/users")
+    assert res.status_code == 200
+    assert res.json() == [
+        {"id": 0, "name": "Owner", "running": True, "current": True},
+        {"id": 10, "name": "Work", "running": False, "current": False},
+    ]
+
+
+async def test_users_404s_for_unknown_or_unauthorized_device(client):
+    res = await client.get("/devices/nope/users")
+    assert res.status_code == 404
+    assert res.json()["error"]["code"] == "device_not_found"
+    assert (await client.get("/devices/ZY22ABCD/users")).status_code == 404
+
+
+async def test_create_user_adds_a_profile_and_returns_the_list(client, framework):
+    res = await client.post("/devices/emulator-5554/users", json={"name": " Tester "})
+    assert res.status_code == 201
+    assert res.json()[-1] == {"id": 11, "name": "Tester", "running": False, "current": False}
+    assert framework.created_users == [("emulator-5554", "Tester")]
+
+    assert (await client.post("/devices/emulator-5554/users", json={"name": ""})).status_code == 422
+    assert (await client.post("/devices/nope/users", json={"name": "x"})).status_code == 404
+
+    framework.user_error = "Error: couldn't create User."
+    res = await client.post("/devices/emulator-5554/users", json={"name": "Another"})
+    assert res.status_code == 400
+    assert res.json()["error"] == {"code": "device_user_error", "message": "Error: couldn't create User."}
+
+
+async def test_activate_user_switches_and_returns_the_list(client, framework):
+    res = await client.post("/devices/emulator-5554/users/10/activate")
+    assert res.status_code == 200
+    assert [u["current"] for u in res.json()] == [False, True]
+    assert framework.switched_users == [("emulator-5554", 10)]
+
+    # Activating the current user is a no-op rather than a second switch.
+    res = await client.post("/devices/emulator-5554/users/10/activate")
+    assert res.status_code == 200
+    assert framework.switched_users == [("emulator-5554", 10)]
+
+    res = await client.post("/devices/emulator-5554/users/99/activate")
+    assert res.status_code == 404
+    assert res.json()["error"]["code"] == "user_not_found"
+    assert (await client.post("/devices/nope/users/0/activate")).status_code == 404
+
+    framework.user_error = "Error: switch failed"
+    res = await client.post("/devices/emulator-5554/users/0/activate")
+    assert res.status_code == 400
+    assert res.json()["error"]["code"] == "device_user_error"
+
+
+def test_parse_user_list_reads_pm_output():
+    from executor.framework import DeviceUser, parse_user_list
+
+    output = """Users:
+\tUserInfo{0:Owner:c13} running
+\tUserInfo{10:Work profile:1030}
+\tUserInfo{11:Tester:c10} running
+"""
+    assert parse_user_list(output, 11) == [
+        DeviceUser(id=0, name="Owner", running=True, current=False),
+        DeviceUser(id=10, name="Work profile", running=False, current=False),
+        DeviceUser(id=11, name="Tester", running=True, current=True),
+    ]
+    assert parse_user_list("Users:\n", None) == []
+
+
+def test_parse_created_user_id_reads_the_new_id_or_raises():
+    import pytest
+
+    from executor.framework import DeviceUserError, parse_created_user_id
+
+    assert parse_created_user_id("Success: created user id 12\n") == 12
+    with pytest.raises(DeviceUserError, match="couldn't create"):
+        parse_created_user_id("Error: couldn't create User.\n")

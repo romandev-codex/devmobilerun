@@ -3,8 +3,13 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends, HTTPException, Response
 
 from ..deps import get_framework, require_token
-from ..framework import DeviceNotFound, Framework
-from ..models import DeviceResponse, DeviceThermalResponse
+from ..framework import DeviceNotFound, DeviceUserError, Framework
+from ..models import (
+    CreateDeviceUserRequest,
+    DeviceResponse,
+    DeviceThermalResponse,
+    DeviceUserResponse,
+)
 
 router = APIRouter(dependencies=[Depends(require_token)])
 
@@ -37,3 +42,63 @@ async def thermal(serial: str, framework: Framework = Depends(get_framework)) ->
             detail={"code": "device_not_found", "message": f"Device {serial} is not connected"},
         ) from None
     return DeviceThermalResponse(temperatureC=temperature)
+
+
+def _device_not_found(serial: str) -> HTTPException:
+    return HTTPException(
+        status_code=404,
+        detail={"code": "device_not_found", "message": f"Device {serial} is not connected"},
+    )
+
+
+def _user_error(exc: DeviceUserError) -> HTTPException:
+    return HTTPException(status_code=400, detail={"code": "device_user_error", "message": str(exc)})
+
+
+async def _users(framework: Framework, serial: str) -> list[DeviceUserResponse]:
+    users = await framework.list_users(serial)
+    return [DeviceUserResponse(id=u.id, name=u.name, running=u.running, current=u.current) for u in users]
+
+
+@router.get("/devices/{serial}/users", response_model=list[DeviceUserResponse])
+async def list_users(serial: str, framework: Framework = Depends(get_framework)) -> list[DeviceUserResponse]:
+    """The Android users (profiles) on the device, from ``pm list users``."""
+    try:
+        return await _users(framework, serial)
+    except DeviceNotFound:
+        raise _device_not_found(serial) from None
+
+
+@router.post("/devices/{serial}/users", status_code=201, response_model=list[DeviceUserResponse])
+async def create_user(
+    serial: str, body: CreateDeviceUserRequest, framework: Framework = Depends(get_framework)
+) -> list[DeviceUserResponse]:
+    """Creates a user with ``pm create-user`` and returns the updated list."""
+    try:
+        await framework.create_user(serial, body.name.strip())
+        return await _users(framework, serial)
+    except DeviceNotFound:
+        raise _device_not_found(serial) from None
+    except DeviceUserError as exc:
+        raise _user_error(exc) from None
+
+
+@router.post("/devices/{serial}/users/{user_id}/activate", response_model=list[DeviceUserResponse])
+async def activate_user(
+    serial: str, user_id: int, framework: Framework = Depends(get_framework)
+) -> list[DeviceUserResponse]:
+    """Brings the user to the foreground with ``am switch-user`` and returns the updated list."""
+    try:
+        users = await framework.list_users(serial)
+        if not any(u.id == user_id for u in users):
+            raise HTTPException(
+                status_code=404,
+                detail={"code": "user_not_found", "message": f"Device {serial} has no user {user_id}"},
+            )
+        if not any(u.id == user_id and u.current for u in users):
+            await framework.switch_user(serial, user_id)
+        return await _users(framework, serial)
+    except DeviceNotFound:
+        raise _device_not_found(serial) from None
+    except DeviceUserError as exc:
+        raise _user_error(exc) from None

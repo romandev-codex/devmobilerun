@@ -253,6 +253,23 @@ describe("executeRun", () => {
     expect((await device())!.activeRunId).toBeNull()
   })
 
+  it("passes the task's device profile to the run and the executor", async () => {
+    await syncDevices()
+    const task = await createTask({ deviceUser: " Work " })
+    const { body } = await runNow(task.id)
+    expect(body.run.deviceUser).toBe("Work")
+    script = [
+      { event: "started", data: {} },
+      { event: "result", data: { success: true, reason: "", steps: 1 } },
+    ]
+    const { executeRun } = await import("@/lib/jobs/run-task")
+    await executeRun(body.run.id)
+    expect(startBodies[0]).toMatchObject({
+      deviceSerial: "emulator-5554",
+      deviceUser: "Work",
+    })
+  })
+
   it("starts a Jev task with the Jev agent on the executor", async () => {
     await syncDevices()
     const task = await createTask({

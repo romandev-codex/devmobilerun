@@ -175,6 +175,11 @@ class RunManager:
         # the goal's steps instead of restarting at zero.
         progress = [0]
         try:
+            # The profile comes first: HOME, the start URL and the agent all
+            # belong to it. Unlike a failed wake, a failed switch ends the run —
+            # working under the wrong profile is the one thing the task forbade.
+            if spec.device_user:
+                await self._switch_to_profile(run, spec.device_user)
             # Every agent starts from an awake device on its home screen; a failed press is not fatal.
             try:
                 await self._framework.wake(spec.device_serial)
@@ -210,6 +215,19 @@ class RunManager:
         finally:
             if not run.done:
                 run.publish(RunEvent("error", {"message": "Run ended unexpectedly"}))
+
+    async def _switch_to_profile(self, run: ActiveRun, name: str) -> None:
+        """Puts the device on the named Android user, creating it when it does not exist yet."""
+        serial = run.spec.device_serial
+        users = await self._framework.list_users(serial)
+        user = next((u for u in users if u.name == name), None)
+        if user is None:
+            user = await self._framework.create_user(serial, name)
+            run.publish(RunEvent("log", {"message": f"Created device profile {name!r} (user {user.id})"}))
+        if user.current:
+            return
+        await self._framework.switch_user(serial, user.id)
+        run.publish(RunEvent("log", {"message": f"Switched to device profile {name!r} (user {user.id})"}))
 
     async def _stream_phase(
         self,

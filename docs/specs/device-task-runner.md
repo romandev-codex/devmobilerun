@@ -28,6 +28,7 @@ The user opens the app, sees every connected phone with a live-ish screenshot, c
 7. As an operator, I want the device page to show the current run and its live events when a run is active, so that I do not have to navigate elsewhere to see what the agent is doing.
 8. As an operator, I want to pause the screenshot refresh on the device page, so that I stop hammering the phone when I am not looking.
 9. As an operator, I want to set the screenshot refresh interval globally in settings, so that I can trade freshness against load.
+9a. As an operator, I want each device to list its Android users (profiles) read over adb, with a button to bring one to the foreground and a form to create a new one, so that I can prepare separate accounts on one phone without touching it.
 
 ### Tasks
 10. As an operator, I want to create a task with a name, so that I can find it again.
@@ -42,6 +43,7 @@ The user opens the app, sees every connected phone with a live-ish screenshot, c
 19. As an operator, I want to delete a task, and be warned if schedules depend on it, so that I do not silently break a schedule.
 20. As an operator, I want a task list with name, last run status, last run time and schedule count, so that I can see the state of my automations in one table.
 21. As an operator, I want a task not to be bound to a device, so that I can run the same task on any phone.
+21a. As an operator, I want a task to optionally name a device profile, so that every run switches the phone to that Android user first, creating it on the phone when it does not exist yet.
 
 ### Running tasks
 22. As an operator, I want to press "Run now" on a task and choose a device, so that I can execute it immediately.
@@ -105,7 +107,8 @@ The user opens the app, sees every connected phone with a live-ish screenshot, c
 - `GET /devices` → adb device list: `[{serial, model, state}]`.
 - `GET /devices/{serial}/screenshot` → `image/png` bytes from the driver's screenshot call. Returns 404 if the device is not listed.
 - `GET /devices/{serial}/thermal` → `{temperatureC}` from `adb shell dumpsys battery` (tenths of a degree, converted); `null` when the device reports no usable sensor. Returns 404 if the device is not listed.
-- `POST /runs` with `{runId, deviceSerial, startUrl?, instruction, options: {vision, reasoning, maxSteps}, variables: {k: v}, prompts?: {role: template}, appCards?: [...]}` → 202 `{runId}`. 409 if the device already has an active run. 404 if the device is not listed. The executor opens `startUrl` on the device through an adb VIEW intent before constructing the agent, so the URL open is deterministic and costs no agent steps.
+- `GET /devices/{serial}/users` → the Android users (profiles) on the device: `[{id, name, running, current}]` from `adb shell pm list users` and `am get-current-user`. `POST /devices/{serial}/users` with `{name}` creates one (`pm create-user`, 201); `POST /devices/{serial}/users/{id}/activate` brings one to the foreground (`am switch-user`, waits until the device reports it). Both respond with the updated list; a refused create or switch is 400 `device_user_error` with adb's message; an unknown id is 404 `user_not_found`; an unlisted device is 404.
+- `POST /runs` with `{runId, deviceSerial, deviceUser?, startUrl?, instruction, options: {vision, reasoning, maxSteps}, variables: {k: v}, prompts?: {role: template}, appCards?: [...]}` → 202 `{runId}`. 409 if the device already has an active run. 404 if the device is not listed. The executor opens `startUrl` on the device through an adb VIEW intent before constructing the agent, so the URL open is deterministic and costs no agent steps. When `deviceUser` names a profile, the executor first switches the device to that user (creating it when no user of that name exists), logging each step as a `log` event; a switch that fails ends the run with `error` before anything else happens, since running under the wrong profile is what the task forbade.
 - `GET /runs/{runId}/events` → SSE stream. Event names: `started`, `screenshot` (base64 PNG, step index), `thought`, `action` (tool name, args, summary, success), `plan`, `log`, `memory` (`op` set/delete, `key`, `value`), `result` (`success`, `reason`, `steps`), `error` (message), `cancelled`. Stream ends after `result`, `error` or `cancelled`. If the run id is unknown, 404. A client that connects after the run started receives events from that point on; the executor does not buffer history (Next.js is the history).
 - `POST /runs/{runId}/stop` → 202; cancels the asyncio task, emits `cancelled`. 404 if unknown.
 - `GET /runs` → list of active runs `[{runId, deviceSerial, startedAt}]` for diagnostics.
@@ -117,9 +120,9 @@ The user opens the app, sees every connected phone with a live-ish screenshot, c
 
 ### MongoDB schema (Mongoose)
 - `devices`: `{serial (unique), displayName?, model?, state: online|offline, lastSeenAt, activeRunId?, lastTemperatureC?, cooldownUntil?}`. Upserted from the executor's device list on every poll; `activeRunId` is the device lock, set with an atomic find-and-update where it is null.
-- `tasks`: `{name, start?: {type: url|instruction, value}, goal, end?, options: {vision, reasoning, maxSteps}, variables: [{key, value}], createdAt, updatedAt}`.
+- `tasks`: `{name, start?: {type: url|instruction, value}, goal, end?, deviceUser?, options: {vision, reasoning, maxSteps}, variables: [{key, value}], createdAt, updatedAt}`.
 - `schedules`: `{taskId, deviceSerial, intervalSeconds, maxRuns?: number|null, enabled, runCount, lastRunId?, nextRunAt?, agendaJobId?, createdAt, updatedAt}`.
-- `runs`: `{taskId, scheduleId?, deviceSerial, status, trigger: manual|schedule, instruction (composed), startUrl?, options, variables, startedAt?, finishedAt?, result?: {success, reason, steps}, error?, skipReason?, createdAt}`.
+- `runs`: `{taskId, scheduleId?, deviceSerial, deviceUser?, status, trigger: manual|schedule, instruction (composed), startUrl?, options, variables, startedAt?, finishedAt?, result?: {success, reason, steps}, error?, skipReason?, createdAt}`.
 - `runEvents`: `{runId, seq, type, at, payload}` where screenshot payloads hold a GridFS file id instead of bytes.
 - `screenshots.files` / `screenshots.chunks`: GridFS bucket for step images, metadata `{runId, seq}`.
 - `settings` (singleton): `{screenshotIntervalMs, screenshotRetentionRuns, maxDeviceTemperatureC, deviceCooldownSeconds, prompts: {role: template}}`.
@@ -141,7 +144,7 @@ queued ──▶ running ──▶ succeeded
 - On boot, all enabled schedules are reconciled with Agenda so they resume after a restart.
 
 ### Next.js route handlers (app-facing API)
-- `GET /api/devices`, `PATCH /api/devices/:serial` (display name), `GET /api/devices/:serial/screenshot` (proxies the executor, cached for the configured interval).
+- `GET /api/devices`, `PATCH /api/devices/:serial` (display name), `GET /api/devices/:serial/screenshot` (proxies the executor, cached for the configured interval), `GET|POST /api/devices/:serial/users` and `POST /api/devices/:serial/users/:id/activate` (proxy the executor's user endpoints; respond with `{users}`).
 - `GET|POST /api/tasks`, `GET|PATCH|DELETE /api/tasks/:id`, `POST /api/tasks/:id/duplicate`, `POST /api/tasks/:id/run` (`{deviceSerial}`).
 - `GET|POST /api/schedules`, `GET|PATCH|DELETE /api/schedules/:id`, `POST /api/schedules/:id/run`.
 - `GET /api/runs` (filters: taskId, deviceSerial, status), `GET|DELETE /api/runs/:id`, `POST /api/runs/:id/stop`, `GET /api/runs/:id/events` (SSE to the browser, replays stored events then tails new ones by polling `runEvents` on a short interval), `GET /api/runs/:id/screenshots/:seq` (GridFS stream).
@@ -149,8 +152,8 @@ queued ──▶ running ──▶ succeeded
 - All request bodies validated with Zod; responses are JSON with a consistent `{error: {code, message}}` envelope on failure.
 
 ### UI pages
-- `/devices` grid of device cards with refreshing screenshots; `/devices/[serial]` large screen, current run panel, device history.
-- `/tasks` table; `/tasks/new` and `/tasks/[id]` form (start, goal, end, options, variables) with Run now and history tab.
+- `/devices` grid of device cards with refreshing screenshots and each phone's profiles (activate, create); `/devices/[serial]` large screen, profiles, current run panel, device history.
+- `/tasks` table; `/tasks/new` and `/tasks/[id]` form (start, goal, end, device profile, options, variables) with Run now and history tab.
 - `/schedules` table with enable toggle, next fire, run count; create/edit dialog.
 - `/runs/[id]` timeline: events on one side, current/selected step screenshot on the other, Stop button while running, result banner when done.
 - `/app-cards` table; `/app-cards/new` and `/app-cards/[id]` form (package name, display name, guidance).

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 
 class HealthResponse(BaseModel):
@@ -46,3 +46,16 @@ class DeviceThermalResponse(BaseModel):
     """Battery temperature in °C, or null when the device reports no usable sensor."""
 
     temperatureC: float | None = None
+
+
+class DeviceUserResponse(BaseModel):
+    """One Android user (profile) on the device."""
+
+    id: int
+    name: str
+    running: bool
+    current: bool
+
+
+class CreateDeviceUserRequest(BaseModel):
+    name: str = Field(min_length=1, max_length=60)

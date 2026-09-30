@@ -62,6 +62,14 @@ const taskChannelSchema = z
   .trim()
   .regex(DB_CHANNEL_NAME_RE, "Channel must be a channel slug")
 
+/** Name of the Android user (profile) runs switch the device to. */
+export const taskDeviceUserSchema = z
+  .string()
+  .trim()
+  .max(60, "Profile name must be at most 60 characters")
+  .transform((v) => (v === "" ? null : v))
+  .nullable()
+
 export const createTaskSchema = z.object({
   name: z.string().trim().min(1, "Name is required").max(120),
   start: taskStartSchema.nullable().default(null),
@@ -80,6 +88,7 @@ export const createTaskSchema = z.object({
   }),
   variables: taskVariablesSchema.default([]),
   channel: taskChannelSchema.nullable().default(null),
+  deviceUser: taskDeviceUserSchema.default(null),
 })
 
 /** Option fields without defaults, so a patch only touches what it names. */
@@ -106,6 +115,7 @@ export const updateTaskSchema = z
     options: taskOptionsPatchSchema,
     variables: taskVariablesSchema,
     channel: taskChannelSchema.nullable(),
+    deviceUser: taskDeviceUserSchema,
   })
   .partial()
   .refine((v) => Object.keys(v).length > 0, { message: "No fields provided" })
@@ -122,6 +132,8 @@ export type TaskView = {
   variables: { key: string; value: string }[]
   /** Slug of the DB channel each run claims a record from, or null. */
   channel: string | null
+  /** Android user (profile) name each run switches the device to, or null. */
+  deviceUser: string | null
   createdAt: string
   updatedAt: string
 }
@@ -141,6 +153,7 @@ export function toTaskView(doc: TaskDoc): TaskView {
     options: toTaskOptions(doc.options),
     variables: doc.variables.map((v) => ({ key: v.key, value: v.value })),
     channel: doc.channel ?? null,
+    deviceUser: doc.deviceUser ?? null,
     createdAt: doc.createdAt.toISOString(),
     updatedAt: doc.updatedAt.toISOString(),
   }
@@ -261,6 +274,7 @@ export async function duplicateTask(id: string): Promise<TaskView> {
     options: source.options,
     variables: source.variables,
     channel: source.channel ?? null,
+    deviceUser: source.deviceUser ?? null,
   })
   return toTaskView(doc.toObject() as TaskDoc)
 }

@@ -45,10 +45,22 @@ class DeviceInfo:
 
 
 @dataclass(frozen=True)
+class DeviceUser:
+    """One Android user (a "profile") on a device, as ``pm list users`` reports it."""
+
+    id: int
+    name: str
+    running: bool
+    current: bool
+
+
+@dataclass(frozen=True)
 class RunSpec:
     run_id: str
     device_serial: str
     instruction: str
+    """Name of the Android user to run under; created on the device when missing."""
+    device_user: str | None = None
     """Which engine drives the phone: the mobilerun agent or TypeSafe's Jev."""
     agent: str = "mobilerun"
     start_url: str | None = None
@@ -69,6 +81,10 @@ class RunSpec:
     focus: str | None = None
 
 
+#: How long a user switch may take before it is reported as failed.
+SWITCH_USER_POLLS = 40
+SWITCH_USER_POLL_SECONDS = 0.5
+
 #: The end step is cleanup, not a second goal, so it gets a small budget of its
 #: own — a task that spent every step on the goal can still be tidied up.
 END_PHASE_MAX_STEPS = 10
@@ -76,6 +92,51 @@ END_PHASE_MAX_STEPS = 10
 
 class DeviceNotFound(Exception):
     """Raised when a serial is not in the adb device list."""
+
+
+class DeviceUserError(Exception):
+    """Raised when the device refuses to create or switch to a user; carries adb's message."""
+
+
+class DeviceUserNotFound(Exception):
+    """Raised when a user id is not on the device."""
+
+
+_USER_LINE_RE = re.compile(r"UserInfo\{(\d+):(.*):[0-9a-fA-F]+\}(\s+running)?")
+
+
+def parse_user_list(output: str, current_id: int | None) -> list[DeviceUser]:
+    """Reads the users from ``pm list users`` output.
+
+    Each user is one ``UserInfo{id:name:flags}`` line, followed by ``running``
+    when that user is started. ``current_id`` (from ``am get-current-user``)
+    marks the user in the foreground.
+    """
+    users: list[DeviceUser] = []
+    for match in _USER_LINE_RE.finditer(output):
+        user_id = int(match.group(1))
+        users.append(
+            DeviceUser(
+                id=user_id,
+                name=match.group(2).strip(),
+                running=match.group(3) is not None,
+                current=user_id == current_id,
+            )
+        )
+    return users
+
+
+def parse_created_user_id(output: str) -> int:
+    """Reads the new id from ``pm create-user`` output (``Success: created user id 11``)."""
+    match = re.search(r"Success: created user id (\d+)", output)
+    if not match:
+        raise DeviceUserError(output.strip() or "pm create-user produced no output")
+    return int(match.group(1))
+
+
+def _device_is_gone(exc: Exception) -> bool:
+    message = str(exc).lower()
+    return "not found" in message or "offline" in message or "unauthorized" in message
 
 
 def parse_battery_temperature(dumpsys_output: str) -> float | None:
@@ -112,6 +173,12 @@ class Framework(Protocol):
     async def screenshot(self, serial: str) -> bytes: ...
 
     async def battery_temperature(self, serial: str) -> float | None: ...
+
+    async def list_users(self, serial: str) -> list[DeviceUser]: ...
+
+    async def create_user(self, serial: str, name: str) -> DeviceUser: ...
+
+    async def switch_user(self, serial: str, user_id: int) -> None: ...
 
     async def open_url(self, serial: str, url: str) -> None: ...
 
@@ -174,32 +241,57 @@ class MobilerunFramework:
 
     async def screenshot(self, serial: str) -> bytes:
         from async_adbutils import adb
-
         from async_adbutils.errors import AdbError
 
         try:
             device = await adb.device(serial=serial)
             return await device.screenshot_bytes()
         except AdbError as exc:
-            message = str(exc).lower()
-            if "not found" in message or "offline" in message or "unauthorized" in message:
+            if _device_is_gone(exc):
                 raise DeviceNotFound(serial) from exc
             raise
 
-    async def battery_temperature(self, serial: str) -> float | None:
+    async def _shell(self, serial: str, args: list[str]) -> str:
+        """Runs one shell command on the device; a missing device raises DeviceNotFound."""
         from async_adbutils import adb
-
         from async_adbutils.errors import AdbError
 
         try:
             device = await adb.device(serial=serial)
-            output = await device.shell(["dumpsys", "battery"])
+            output = await device.shell(args)
         except AdbError as exc:
-            message = str(exc).lower()
-            if "not found" in message or "offline" in message or "unauthorized" in message:
+            if _device_is_gone(exc):
                 raise DeviceNotFound(serial) from exc
             raise
-        return parse_battery_temperature(output if isinstance(output, str) else str(output))
+        return output if isinstance(output, str) else str(output)
+
+    async def battery_temperature(self, serial: str) -> float | None:
+        return parse_battery_temperature(await self._shell(serial, ["dumpsys", "battery"]))
+
+    async def _current_user(self, serial: str) -> int | None:
+        raw = (await self._shell(serial, ["am", "get-current-user"])).strip()
+        return int(raw) if raw.isdigit() else None
+
+    async def list_users(self, serial: str) -> list[DeviceUser]:
+        output = await self._shell(serial, ["pm", "list", "users"])
+        return parse_user_list(output, await self._current_user(serial))
+
+    async def create_user(self, serial: str, name: str) -> DeviceUser:
+        output = await self._shell(serial, ["pm", "create-user", name])
+        return DeviceUser(id=parse_created_user_id(output), name=name, running=False, current=False)
+
+    async def switch_user(self, serial: str, user_id: int) -> None:
+        """Brings the user to the foreground and waits until the device reports it."""
+        import asyncio
+
+        output = await self._shell(serial, ["am", "switch-user", str(user_id)])
+        if "error" in output.lower():
+            raise DeviceUserError(output.strip())
+        for _ in range(SWITCH_USER_POLLS):
+            if await self._current_user(serial) == user_id:
+                return
+            await asyncio.sleep(SWITCH_USER_POLL_SECONDS)
+        raise DeviceUserError(f"Device did not switch to user {user_id} in time")
 
     async def open_url(self, serial: str, url: str) -> None:
         from async_adbutils import adb

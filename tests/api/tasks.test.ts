@@ -110,6 +110,21 @@ describe("tasks", () => {
     )
   })
 
+  it("stores a device profile name, clears it with an empty patch and rejects long names", async () => {
+    const { status, body } = await create({ ...valid, deviceUser: "  Work " })
+    expect(status).toBe(201)
+    expect(body.task.deviceUser).toBe("Work")
+
+    const cleared = await one("PATCH", body.task.id, { deviceUser: "" })
+    expect(cleared.status).toBe(200)
+    expect(cleared.body.task.deviceUser).toBeNull()
+
+    expect((await create({ ...valid })).body.task.deviceUser).toBeNull()
+    expect(
+      (await create({ ...valid, deviceUser: "x".repeat(61) })).status
+    ).toBe(400)
+  })
+
   it("rejects invalid input with a validation_error envelope", async () => {
     const missingGoal = await create({ name: "x" })
     expect(missingGoal.status).toBe(400)

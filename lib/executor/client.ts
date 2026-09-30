@@ -4,6 +4,7 @@ import type {
   ExecutorConfig,
   ExecutorDevice,
   ExecutorDeviceThermal,
+  ExecutorDeviceUser,
   ExecutorHealth,
   StartRunRequest,
 } from "@/lib/executor/types"
@@ -109,6 +110,24 @@ export const executor = {
   deviceThermal: (serial: string) =>
     executorJson<ExecutorDeviceThermal>(
       `/devices/${encodeURIComponent(serial)}/thermal`
+    ),
+  deviceUsers: (serial: string) =>
+    executorJson<ExecutorDeviceUser[]>(
+      `/devices/${encodeURIComponent(serial)}/users`
+    ),
+  createDeviceUser: (serial: string, name: string) =>
+    executorJson<ExecutorDeviceUser[]>(
+      `/devices/${encodeURIComponent(serial)}/users`,
+      {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ name }),
+      }
+    ),
+  activateDeviceUser: (serial: string, userId: number) =>
+    executorJson<ExecutorDeviceUser[]>(
+      `/devices/${encodeURIComponent(serial)}/users/${userId}/activate`,
+      { method: "POST" }
     ),
   screenshot: async (serial: string): Promise<Uint8Array> => {
     const res = await executorFetch(

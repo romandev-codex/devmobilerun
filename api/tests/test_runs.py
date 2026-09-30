@@ -264,3 +264,50 @@ async def test_run_id_may_be_reused_after_the_run_finished(client, framework):
     assert res.status_code == 409
     assert res.json()["error"]["code"] == "run_exists"
     await client.post("/runs/live/stop")
+
+
+async def test_run_switches_to_the_task_profile_before_waking(client, framework):
+    await client.post("/runs", json=start_body(run_id="run-profile", deviceUser="Work"))
+    events = await collect_events(client, "run-profile")
+    assert events[0].event == "log"
+    assert events[0].data["message"] == "Switched to device profile 'Work' (user 10)"
+    assert [e.event for e in events][1:] == ["started", "thought", "action", "result"]
+    assert framework.switched_users == [("emulator-5554", 10)]
+    assert framework.created_users == []
+    assert framework.woken == ["emulator-5554"]
+    assert framework.specs[0].device_user == "Work"
+
+
+async def test_run_creates_a_missing_profile_then_switches(client, framework):
+    await client.post("/runs", json=start_body(run_id="run-new-profile", deviceUser="Tester"))
+    events = await collect_events(client, "run-new-profile")
+    assert [e.event for e in events][:3] == ["log", "log", "started"]
+    assert events[0].data["message"] == "Created device profile 'Tester' (user 11)"
+    assert events[1].data["message"] == "Switched to device profile 'Tester' (user 11)"
+    assert framework.created_users == [("emulator-5554", "Tester")]
+    assert framework.switched_users == [("emulator-5554", 11)]
+
+
+async def test_run_on_the_current_profile_does_not_switch(client, framework):
+    await client.post("/runs", json=start_body(run_id="run-owner", deviceUser="Owner"))
+    events = await collect_events(client, "run-owner")
+    assert [e.event for e in events][0] == "started"
+    assert framework.switched_users == []
+
+
+async def test_run_without_a_profile_leaves_users_alone(client, framework):
+    await client.post("/runs", json=start_body(run_id="run-no-profile", deviceUser="  "))
+    events = await collect_events(client, "run-no-profile")
+    assert [e.event for e in events][0] == "started"
+    assert framework.specs[0].device_user is None
+    assert framework.switched_users == []
+
+
+async def test_a_failed_profile_switch_ends_the_run_with_an_error(client, framework):
+    framework.user_error = "Error: switch failed"
+    await client.post("/runs", json=start_body(run_id="run-bad-profile", deviceUser="Work"))
+    events = await collect_events(client, "run-bad-profile")
+    assert [e.event for e in events] == ["error"]
+    assert events[0].data["message"] == "DeviceUserError: Error: switch failed"
+    assert framework.woken == []
+    assert framework.specs == []

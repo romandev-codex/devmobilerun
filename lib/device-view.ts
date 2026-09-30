@@ -21,6 +21,16 @@ export type DeviceTemperatureView = {
   readAt: string
 }
 
+/** One Android user (profile) on a device. */
+export type DeviceUserView = {
+  id: number
+  name: string
+  /** Started in the background or foreground. */
+  running: boolean
+  /** The user in the foreground. */
+  current: boolean
+}
+
 export function deviceLabel(
   d: Pick<DeviceView, "displayName" | "model" | "serial">
 ): string {

@@ -30,10 +30,20 @@ export type ExecutorDeviceThermal = {
   temperatureC: number | null
 }
 
+/** One Android user (profile) on a device, from `pm list users`. */
+export type ExecutorDeviceUser = {
+  id: number
+  name: string
+  running: boolean
+  current: boolean
+}
+
 export type StartRunRequest = {
   runId: string
   deviceSerial: string
   instruction: string
+  /** Android user (profile) name to run under; the executor creates it when missing. */
+  deviceUser?: string | null
   startUrl?: string | null
   /** The task's closing step; the executor runs it after the goal, whatever the goal did. */
   endInstruction?: string | null

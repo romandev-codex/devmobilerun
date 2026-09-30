@@ -9,10 +9,11 @@ import { TaskMemoryForm } from "@/components/tasks/task-memory-form"
 import { Button } from "@/components/ui/button"
 import { ApiError } from "@/lib/api/errors"
 import { listChannelOptions } from "@/lib/db-channels"
+import { knownDeviceProfiles } from "@/lib/device-users"
 import { deviceLabel, listDevices } from "@/lib/devices"
 import { listRuns } from "@/lib/runs/service"
 import { getTaskMemory } from "@/lib/task-memory"
-import { getTask } from "@/lib/tasks"
+import { getTask, type TaskSummary } from "@/lib/tasks"
 
 export const dynamic = "force-dynamic"
 
@@ -62,7 +63,7 @@ export default async function TaskPage({
         ))}
       </div>
       {tab === "edit" ? (
-        <TaskForm task={task} channels={await listChannelOptions()} />
+        <EditTab task={task} />
       ) : tab === "memory" ? (
         <TaskMemoryForm memory={await getTaskMemory(task.id)} />
       ) : (
@@ -70,6 +71,14 @@ export default async function TaskPage({
       )}
     </div>
   )
+}
+
+async function EditTab({ task }: { task: TaskSummary }) {
+  const [channels, profiles] = await Promise.all([
+    listChannelOptions(),
+    knownDeviceProfiles(),
+  ])
+  return <TaskForm task={task} channels={channels} profiles={profiles} />
 }
 
 async function TaskHistory({

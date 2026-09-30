@@ -2,6 +2,7 @@ import Link from "next/link"
 
 import { DeviceNameEditor } from "@/components/devices/device-name-editor"
 import { DeviceScreen } from "@/components/devices/device-screen"
+import { DeviceUsers } from "@/components/devices/device-users"
 import { Badge } from "@/components/ui/badge"
 import { Card, CardContent, CardHeader } from "@/components/ui/card"
 import type { DeviceView } from "@/lib/devices"
@@ -51,6 +52,7 @@ export function DeviceCard({
             intervalMs={intervalMs}
           />
         </Link>
+        <DeviceUsers serial={device.serial} online={device.online} compact />
         <div className="flex items-center justify-between text-xs">
           <span className="text-muted-foreground">
             {device.activeRunId

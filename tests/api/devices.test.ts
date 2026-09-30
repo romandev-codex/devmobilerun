@@ -12,6 +12,10 @@ let thermal: { status: number; body: unknown } = {
   status: 200,
   body: { temperatureC: 33.4 },
 }
+type FakeUser = { id: number; name: string; running: boolean; current: boolean }
+let users: FakeUser[] = []
+let userCalls: { method: string; path: string; body: unknown }[] = []
+let userFailure: { status: number; body: unknown } | null = null
 
 beforeAll(async () => {
   fake = await startFakeExecutor()
@@ -20,6 +24,20 @@ beforeAll(async () => {
   fake.on("GET", "/devices/:serial/thermal", (_req, _res, { json }) =>
     json(thermal.body, thermal.status)
   )
+  const usersRoute = (method: string, path: string, status = 200) =>
+    fake.on(method, path, async (req, _res, { json, body }) => {
+      const raw = await body()
+      userCalls.push({
+        method,
+        path: new URL(req.url ?? "/", "http://fake").pathname,
+        body: raw ? JSON.parse(raw) : null,
+      })
+      if (userFailure) return json(userFailure.body, userFailure.status)
+      json(users, status)
+    })
+  usersRoute("GET", "/devices/:serial/users")
+  usersRoute("POST", "/devices/:serial/users", 201)
+  usersRoute("POST", "/devices/:serial/users/:id/activate")
 })
 
 afterAll(() => fake.close())
@@ -164,5 +182,129 @@ describe("device temperature", () => {
     const { status, body } = await readViaRoute("ghost")
     expect(status).toBe(404)
     expect(body.error.code).toBe("not_found")
+  })
+})
+
+describe("device users", () => {
+  const ctx = (serial: string) => ({ params: Promise.resolve({ serial }) })
+  const userCtx = (serial: string, id: string) => ({
+    params: Promise.resolve({ serial, id }),
+  })
+
+  beforeAll(() => {
+    users = [
+      { id: 0, name: "Owner", running: true, current: true },
+      { id: 10, name: "Work", running: false, current: false },
+    ]
+  })
+
+  it("lists the users the executor reads over adb", async () => {
+    userCalls = []
+    const { GET } = await import("@/app/api/devices/[serial]/users/route")
+    const res = await GET(
+      new Request("http://app/api/devices/emulator-5554/users"),
+      ctx("emulator-5554")
+    )
+    expect(res.status).toBe(200)
+    expect((await res.json()).users).toEqual(users)
+    expect(userCalls).toEqual([
+      { method: "GET", path: "/devices/emulator-5554/users", body: null },
+    ])
+  })
+
+  it("creates a user through the executor and validates the name", async () => {
+    userCalls = []
+    const { POST } = await import("@/app/api/devices/[serial]/users/route")
+    const res = await POST(
+      new Request("http://app/api/devices/emulator-5554/users", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ name: "  Tester " }),
+      }),
+      ctx("emulator-5554")
+    )
+    expect(res.status).toBe(201)
+    expect((await res.json()).users).toEqual(users)
+    expect(userCalls).toEqual([
+      {
+        method: "POST",
+        path: "/devices/emulator-5554/users",
+        body: { name: "Tester" },
+      },
+    ])
+
+    const empty = await POST(
+      new Request("http://app/api/devices/emulator-5554/users", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ name: "   " }),
+      }),
+      ctx("emulator-5554")
+    )
+    expect(empty.status).toBe(400)
+    expect((await empty.json()).error.code).toBe("validation_error")
+  })
+
+  it("activates a user by id and rejects ids that are not numbers", async () => {
+    userCalls = []
+    const { POST } =
+      await import("@/app/api/devices/[serial]/users/[id]/activate/route")
+    const res = await POST(
+      new Request("http://app/api/devices/emulator-5554/users/10/activate", {
+        method: "POST",
+      }),
+      userCtx("emulator-5554", "10")
+    )
+    expect(res.status).toBe(200)
+    expect(userCalls).toEqual([
+      {
+        method: "POST",
+        path: "/devices/emulator-5554/users/10/activate",
+        body: null,
+      },
+    ])
+
+    const bad = await POST(
+      new Request("http://app/api/devices/emulator-5554/users/abc/activate", {
+        method: "POST",
+      }),
+      userCtx("emulator-5554", "abc")
+    )
+    expect(bad.status).toBe(400)
+  })
+
+  it("maps executor failures: a missing device is 404, a refused switch keeps its message", async () => {
+    const { GET } = await import("@/app/api/devices/[serial]/users/route")
+    userFailure = {
+      status: 404,
+      body: { error: { code: "device_not_found", message: "gone" } },
+    }
+    try {
+      const missing = await GET(
+        new Request("http://app/api/devices/ghost/users"),
+        ctx("ghost")
+      )
+      expect(missing.status).toBe(404)
+      expect((await missing.json()).error.code).toBe("not_found")
+
+      userFailure = {
+        status: 400,
+        body: {
+          error: { code: "device_user_error", message: "Error: switch failed" },
+        },
+      }
+      const { POST } =
+        await import("@/app/api/devices/[serial]/users/[id]/activate/route")
+      const refused = await POST(
+        new Request("http://app/api/devices/emulator-5554/users/0/activate", {
+          method: "POST",
+        }),
+        userCtx("emulator-5554", "0")
+      )
+      expect(refused.status).toBe(400)
+      expect((await refused.json()).error.message).toBe("Error: switch failed")
+    } finally {
+      userFailure = null
+    }
   })
 })

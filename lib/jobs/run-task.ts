@@ -90,6 +90,7 @@ export async function executeRun(runId: string): Promise<void> {
     await executor.startRun({
       runId: run._id.toString(),
       deviceSerial: run.deviceSerial,
+      deviceUser: run.deviceUser ?? null,
       instruction: run.instruction,
       startUrl: run.startUrl,
       endInstruction: run.endInstruction,

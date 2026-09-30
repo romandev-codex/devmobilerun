@@ -43,6 +43,8 @@ const taskSchema = new Schema(
     variables: { type: [variableSchema], required: true, default: [] },
     /** Slug of a DB channel; every run of the task consumes one of its records. */
     channel: { type: String, default: null },
+    /** Android user (profile) name each run switches the device to; created when missing. */
+    deviceUser: { type: String, default: null },
   },
   { timestamps: true }
 )

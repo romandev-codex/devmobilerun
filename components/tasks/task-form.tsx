@@ -42,6 +42,7 @@ type FormState = {
   maxSteps: string
   variables: { key: string; value: string }[]
   channel: string | null
+  deviceUser: string
 }
 
 function fromTask(task?: TaskView): FormState {
@@ -57,6 +58,7 @@ function fromTask(task?: TaskView): FormState {
     maxSteps: String(task?.options.maxSteps ?? 15),
     variables: task?.variables.map((v) => ({ ...v })) ?? [],
     channel: task?.channel ?? null,
+    deviceUser: task?.deviceUser ?? "",
   }
 }
 
@@ -77,16 +79,20 @@ function toPayload(f: FormState) {
     },
     variables: f.variables,
     channel: f.channel,
+    deviceUser: f.deviceUser,
   }
 }
 
 export function TaskForm({
   task,
   channels,
+  profiles = [],
 }: {
   task?: TaskView
   /** Every DB channel the task can be bound to, with its next pending record. */
   channels: ChannelOption[]
+  /** Profile names seen on the online devices, offered as suggestions. */
+  profiles?: string[]
 }) {
   // A task bound to a channel that has since been deleted still shows its slug.
   const channelOptions = channels.map((c) => c.name)
@@ -201,6 +207,30 @@ export function TaskForm({
               Performed as a separate last step once the goal is over — whether
               it succeeded, failed or ran out of steps. It does not decide
               whether the run succeeded.
+            </p>
+          </div>
+
+          <div className="grid gap-1.5">
+            <Label htmlFor="deviceUser">Device profile (optional)</Label>
+            <Input
+              id="deviceUser"
+              list="device-profile-suggestions"
+              value={form.deviceUser}
+              onChange={(e) => set("deviceUser", e.target.value)}
+              maxLength={60}
+              placeholder="Owner"
+              className="w-64"
+            />
+            <datalist id="device-profile-suggestions">
+              {profiles.map((p) => (
+                <option key={p} value={p} />
+              ))}
+            </datalist>
+            <p className="text-xs text-muted-foreground">
+              The Android user the phone is switched to before each run. Pick a
+              profile that exists on your devices or type a new name: it is
+              created on the phone the first time the task runs there. Leave
+              empty to run on whatever profile is active.
             </p>
           </div>
         </CardContent>

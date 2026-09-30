@@ -5,6 +5,7 @@ import { DeviceStateBadge } from "@/components/devices/device-card"
 import { DeviceNameEditor } from "@/components/devices/device-name-editor"
 import { DeviceScreen } from "@/components/devices/device-screen"
 import { DeviceTemperature } from "@/components/devices/device-temperature"
+import { DeviceUsers } from "@/components/devices/device-users"
 import { ApiError } from "@/lib/api/errors"
 import { readDeviceTemperature } from "@/lib/device-thermal"
 import { deviceLabel, getDevice } from "@/lib/devices"
@@ -92,6 +93,15 @@ export default async function DevicePage({
               />
             </dd>
           </dl>
+          <section>
+            <h2 className="mb-2 text-sm font-medium">Profiles</h2>
+            <DeviceUsers serial={device.serial} online={device.online} />
+            <p className="mt-2 text-xs text-muted-foreground">
+              Android users on the phone, read over adb. Activate one to bring
+              it to the foreground; a task with a profile set switches to it
+              before every run.
+            </p>
+          </section>
         </div>
       </div>
       <section className="mt-8">

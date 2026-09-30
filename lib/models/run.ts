@@ -31,6 +31,8 @@ const runSchema = new Schema(
       index: true,
     },
     deviceSerial: { type: String, required: true },
+    /** Android user (profile) the run switches the device to before starting. */
+    deviceUser: { type: String, default: null },
     status: {
       type: String,
       enum: RUN_STATUSES,
