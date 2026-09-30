@@ -1,5 +1,7 @@
 import pytest
 
+from executor.framework import DeviceUser
+
 pytestmark = pytest.mark.anyio
 
 
@@ -178,3 +180,44 @@ async def test_create_user_falls_back_to_a_guest_user_when_refused():
     with pytest.raises(DeviceUserError, match="couldn't create User.; as guest: Error: guest refused too"):
         await framework.create_user("emulator-5554", "Tester")
     assert len(calls) == 2
+
+
+async def test_remove_user_deletes_an_additional_profile_but_never_the_owner(client, framework):
+    res = await client.delete("/devices/emulator-5554/users/10")
+    assert res.status_code == 200
+    assert res.json() == [{"id": 0, "name": "Owner", "running": True, "current": True}]
+    assert framework.removed_users == [("emulator-5554", 10)]
+
+    res = await client.delete("/devices/emulator-5554/users/0")
+    assert res.status_code == 400
+    assert res.json()["error"]["message"] == "The owner profile cannot be removed"
+    assert framework.removed_users == [("emulator-5554", 10)]
+
+    res = await client.delete("/devices/emulator-5554/users/99")
+    assert res.status_code == 404
+    assert res.json()["error"]["code"] == "user_not_found"
+    assert (await client.delete("/devices/nope/users/10")).status_code == 404
+
+    framework.users["emulator-5554"].append(DeviceUser(id=11, name="Tester", running=False, current=False))
+    framework.user_error = "Error: couldn't remove user"
+    res = await client.delete("/devices/emulator-5554/users/11")
+    assert res.status_code == 400
+    assert res.json()["error"]["code"] == "device_user_error"
+
+
+async def test_remove_user_runs_pm_remove_user_with_force():
+    from executor.framework import DeviceUserError, MobilerunFramework
+
+    calls: list[list[str]] = []
+    replies = iter(["Success: removed user", "Error: couldn't remove user"])
+
+    async def fake_shell(serial: str, args: list[str]) -> str:
+        calls.append(args)
+        return next(replies)
+
+    framework = MobilerunFramework()
+    framework._shell = fake_shell  # type: ignore[method-assign]
+    await framework.remove_user("emulator-5554", 12)
+    assert calls == [["pm", "remove-user", "-f", "12"]]
+    with pytest.raises(DeviceUserError, match="couldn't remove"):
+        await framework.remove_user("emulator-5554", 12)

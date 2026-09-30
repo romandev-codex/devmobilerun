@@ -180,6 +180,8 @@ class Framework(Protocol):
 
     async def switch_user(self, serial: str, user_id: int) -> None: ...
 
+    async def remove_user(self, serial: str, user_id: int) -> None: ...
+
     async def open_url(self, serial: str, url: str) -> None: ...
 
     async def wake(self, serial: str) -> None: ...
@@ -289,6 +291,11 @@ class MobilerunFramework:
             except DeviceUserError as second:
                 raise DeviceUserError(f"{first}; as guest: {second}") from None
         return DeviceUser(id=user_id, name=name, running=False, current=False)
+
+    async def remove_user(self, serial: str, user_id: int) -> None:
+        output = await self._shell(serial, ["pm", "remove-user", "-f", str(user_id)])
+        if "success" not in output.lower():
+            raise DeviceUserError(output.strip() or f"pm remove-user gave no answer for user {user_id}")
 
     async def switch_user(self, serial: str, user_id: int) -> None:
         """Brings the user to the foreground and waits until the device reports it."""

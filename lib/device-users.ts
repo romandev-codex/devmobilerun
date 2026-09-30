@@ -1,6 +1,6 @@
 import { z } from "zod"
 
-import { notFound } from "@/lib/api/errors"
+import { ApiError, notFound } from "@/lib/api/errors"
 import type { DeviceUserView } from "@/lib/device-view"
 import { connectDb } from "@/lib/db"
 import { executor, ExecutorError } from "@/lib/executor/client"
@@ -58,6 +58,21 @@ export function activateDeviceUser(
 ): Promise<DeviceUserView[]> {
   const userId = z.coerce.number().int().min(0).parse(id)
   return viaExecutor(() => executor.activateDeviceUser(serial, userId))
+}
+
+/** Deletes an additional user (never the owner) and returns the updated list. */
+export function removeDeviceUser(
+  serial: string,
+  id: string
+): Promise<DeviceUserView[]> {
+  const userId = z.coerce.number().int().min(0).parse(id)
+  if (userId === 0)
+    throw new ApiError(
+      "validation_error",
+      "The owner profile cannot be removed",
+      400
+    )
+  return viaExecutor(() => executor.removeDeviceUser(serial, userId))
 }
 
 /**

@@ -1,6 +1,6 @@
 "use client"
 
-import { Plus, RefreshCw, UserRound } from "lucide-react"
+import { Plus, RefreshCw, Trash2, UserRound } from "lucide-react"
 import { useEffect, useState } from "react"
 
 import { Badge } from "@/components/ui/badge"
@@ -66,6 +66,20 @@ export function DeviceUsers({
       "POST",
       {}
     )
+    setBusy(null)
+    if (!res.ok) return setError(res.message)
+    setUsers(res.body.users)
+  }
+
+  async function remove(user: DeviceUserView) {
+    const label = user.name || `User ${user.id}`
+    if (!confirm(`Remove profile "${label}" and everything stored in it?`))
+      return
+    setBusy(user.id)
+    setError(null)
+    const res = await apiFetch<UsersBody>(`${base}/${user.id}`, {
+      method: "DELETE",
+    })
     setBusy(null)
     if (!res.ok) return setError(res.message)
     setUsers(res.body.users)
@@ -169,19 +183,33 @@ export function DeviceUsers({
                   <Badge variant="outline">running</Badge>
                 ) : null}
               </span>
-              <Button
-                type="button"
-                size="xs"
-                variant={u.current ? "ghost" : "outline"}
-                disabled={u.current || busy !== null}
-                onClick={() => void activate(u)}
-              >
-                {busy === u.id
-                  ? "Switching…"
-                  : u.current
-                    ? "Active"
-                    : "Activate"}
-              </Button>
+              <span className="flex shrink-0 gap-1">
+                <Button
+                  type="button"
+                  size="xs"
+                  variant={u.current ? "ghost" : "outline"}
+                  disabled={u.current || busy !== null}
+                  onClick={() => void activate(u)}
+                >
+                  {busy === u.id
+                    ? "Working…"
+                    : u.current
+                      ? "Active"
+                      : "Activate"}
+                </Button>
+                {u.id !== 0 ? (
+                  <Button
+                    type="button"
+                    size="icon-xs"
+                    variant="ghost"
+                    title="Remove profile"
+                    disabled={busy !== null}
+                    onClick={() => void remove(u)}
+                  >
+                    <Trash2 className="text-destructive" />
+                  </Button>
+                ) : null}
+              </span>
             </li>
           ))}
         </ul>

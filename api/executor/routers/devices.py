@@ -83,6 +83,31 @@ async def create_user(
         raise _user_error(exc) from None
 
 
+@router.delete("/devices/{serial}/users/{user_id}", response_model=list[DeviceUserResponse])
+async def remove_user(
+    serial: str, user_id: int, framework: Framework = Depends(get_framework)
+) -> list[DeviceUserResponse]:
+    """Deletes an additional user with ``pm remove-user -f``; the owner (user 0) stays."""
+    if user_id == 0:
+        raise HTTPException(
+            status_code=400,
+            detail={"code": "device_user_error", "message": "The owner profile cannot be removed"},
+        )
+    try:
+        users = await framework.list_users(serial)
+        if not any(u.id == user_id for u in users):
+            raise HTTPException(
+                status_code=404,
+                detail={"code": "user_not_found", "message": f"Device {serial} has no user {user_id}"},
+            )
+        await framework.remove_user(serial, user_id)
+        return await _users(framework, serial)
+    except DeviceNotFound:
+        raise _device_not_found(serial) from None
+    except DeviceUserError as exc:
+        raise _user_error(exc) from None
+
+
 @router.post("/devices/{serial}/users/{user_id}/activate", response_model=list[DeviceUserResponse])
 async def activate_user(
     serial: str, user_id: int, framework: Framework = Depends(get_framework)

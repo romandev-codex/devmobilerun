@@ -38,6 +38,7 @@ beforeAll(async () => {
   usersRoute("GET", "/devices/:serial/users")
   usersRoute("POST", "/devices/:serial/users", 201)
   usersRoute("POST", "/devices/:serial/users/:id/activate")
+  usersRoute("DELETE", "/devices/:serial/users/:id")
 })
 
 afterAll(() => fake.close())
@@ -271,6 +272,34 @@ describe("device users", () => {
       userCtx("emulator-5554", "abc")
     )
     expect(bad.status).toBe(400)
+  })
+
+  it("removes an additional user and refuses the owner without asking the executor", async () => {
+    userCalls = []
+    const { DELETE } =
+      await import("@/app/api/devices/[serial]/users/[id]/route")
+    const res = await DELETE(
+      new Request("http://app/api/devices/emulator-5554/users/10", {
+        method: "DELETE",
+      }),
+      userCtx("emulator-5554", "10")
+    )
+    expect(res.status).toBe(200)
+    expect(userCalls).toEqual([
+      { method: "DELETE", path: "/devices/emulator-5554/users/10", body: null },
+    ])
+
+    const owner = await DELETE(
+      new Request("http://app/api/devices/emulator-5554/users/0", {
+        method: "DELETE",
+      }),
+      userCtx("emulator-5554", "0")
+    )
+    expect(owner.status).toBe(400)
+    expect((await owner.json()).error.message).toBe(
+      "The owner profile cannot be removed"
+    )
+    expect(userCalls).toHaveLength(1)
   })
 
   it("maps executor failures: a missing device is 404, a refused switch keeps its message", async () => {

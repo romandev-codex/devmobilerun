@@ -45,6 +45,7 @@ class FakeFramework:
         }
         self.created_users: list[tuple[str, str]] = []
         self.switched_users: list[tuple[str, int]] = []
+        self.removed_users: list[tuple[str, int]] = []
         self.next_user_id = 11
         # When set, creating or switching a user fails with this message.
         self.user_error: str | None = None
@@ -108,6 +109,13 @@ class FakeFramework:
             for u in self.users.get(serial, [])
         ]
         self.switched_users.append((serial, user_id))
+
+    async def remove_user(self, serial: str, user_id: int) -> None:
+        self._require_online(serial)
+        if self.user_error:
+            raise DeviceUserError(self.user_error)
+        self.users[serial] = [u for u in self.users.get(serial, []) if u.id != user_id]
+        self.removed_users.append((serial, user_id))
 
     async def open_url(self, serial: str, url: str) -> None:
         self.opened_urls.append((serial, url))

@@ -124,6 +124,11 @@ export const executor = {
         body: JSON.stringify({ name }),
       }
     ),
+  removeDeviceUser: (serial: string, userId: number) =>
+    executorJson<ExecutorDeviceUser[]>(
+      `/devices/${encodeURIComponent(serial)}/users/${userId}`,
+      { method: "DELETE" }
+    ),
   activateDeviceUser: (serial: string, userId: number) =>
     executorJson<ExecutorDeviceUser[]>(
       `/devices/${encodeURIComponent(serial)}/users/${userId}/activate`,
