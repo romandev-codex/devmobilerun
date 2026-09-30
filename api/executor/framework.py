@@ -102,6 +102,8 @@ PORTAL_VERSION_POLL_SECONDS = 1.0
 #: Pause after the user is unlocked, for the launcher and the profile's apps to
 #: come up before HOME is pressed. Only paid when the device actually switched.
 SWITCH_USER_SETTLE_SECONDS = 60.0
+#: SystemUI's per-user setting behind the "Welcome back, guest?" resume dialog.
+GUEST_LOGGED_IN_SETTING = "systemui.guest_has_logged_in"
 
 #: The end step is cleanup, not a second goal, so it gets a small budget of its
 #: own — a task that spent every step on the goal can still be tidied up.
@@ -373,6 +375,7 @@ class MobilerunFramework:
         from . import multiuser
 
         multiuser.forget(serial)
+        await self._clear_guest_resume_prompt(serial, user_id)
         output = await self._shell(serial, ["am", "switch-user", "-w", str(user_id)])
         if _unknown_option(output):
             output = await self._shell(serial, ["am", "switch-user", str(user_id)])
@@ -389,6 +392,27 @@ class MobilerunFramework:
                     f"Device did not finish switching to user {user_id} within {SWITCH_USER_TIMEOUT_SECONDS:.0f}s"
                 )
             await asyncio.sleep(SWITCH_USER_POLL_SECONDS)
+
+    async def _clear_guest_resume_prompt(self, serial: str, user_id: int) -> None:
+        """Keeps SystemUI from asking "Welcome back, guest?" after the switch.
+
+        Switching to a guest that has been used before shows a resume dialog
+        whose "Start again" button wipes the guest. SystemUI shows it when the
+        ``systemui.guest_has_logged_in`` setting is 1, and the switch sets it
+        back to 1, so it is cleared before every switch. Newer builds keep the
+        setting in the ``secure`` namespace, older ones in ``system``; both are
+        written since a stray setting in the other namespace is harmless. For
+        a full (non-guest) user the setting is never read. Failures are
+        ignored: the dialog is a nuisance, not a reason to fail the switch.
+        """
+        for namespace in ("secure", "system"):
+            try:
+                await self._shell(
+                    serial,
+                    ["settings", "--user", str(user_id), "put", namespace, GUEST_LOGGED_IN_SETTING, "0"],
+                )
+            except Exception:  # noqa: BLE001 - best effort
+                return
 
     async def _user_unlocked(self, serial: str, user_id: int) -> bool:
         """Whether the user has finished starting (``RUNNING_UNLOCKED``).

@@ -283,6 +283,7 @@ async def test_switch_user_waits_until_the_user_is_current_and_unlocked(fast_swi
 
     shell = ScriptedShell(
         {
+            "settings --user": [""],
             "am switch-user": [""],
             "am get-current-user": ["0", "10"],
             "am get-started-user-state": ["RUNNING_LOCKED", "RUNNING_UNLOCKED"],
@@ -291,7 +292,12 @@ async def test_switch_user_waits_until_the_user_is_current_and_unlocked(fast_swi
     framework = MobilerunFramework()
     framework._shell = shell  # type: ignore[method-assign]
     await framework.switch_user("emulator-5554", 10)
-    assert shell.calls[0] == ["am", "switch-user", "-w", "10"]
+    # The guest resume prompt is disarmed in both settings namespaces before the switch.
+    assert shell.calls[:3] == [
+        ["settings", "--user", "10", "put", "secure", "systemui.guest_has_logged_in", "0"],
+        ["settings", "--user", "10", "put", "system", "systemui.guest_has_logged_in", "0"],
+        ["am", "switch-user", "-w", "10"],
+    ]
     # Polled until both the foreground and the unlocked state agreed.
     states = [c for c in shell.calls if c[:2] == ["am", "get-started-user-state"]]
     assert len(states) == 2
@@ -303,6 +309,7 @@ async def test_switch_user_falls_back_without_the_wait_flag_and_to_pm_running(fa
 
     shell = ScriptedShell(
         {
+            "settings --user": [""],
             "am switch-user": ["Error: Unknown option: -w", ""],
             "am get-current-user": ["10"],
             "am get-started-user-state": ["Error: unknown command 'get-started-user-state'"],
@@ -313,7 +320,7 @@ async def test_switch_user_falls_back_without_the_wait_flag_and_to_pm_running(fa
     framework = MobilerunFramework()
     framework._shell = shell  # type: ignore[method-assign]
     await framework.switch_user("emulator-5554", 10)
-    assert shell.calls[:2] == [["am", "switch-user", "-w", "10"], ["am", "switch-user", "10"]]
+    assert shell.calls[2:4] == [["am", "switch-user", "-w", "10"], ["am", "switch-user", "10"]]
     assert ["pm", "list", "users"] in shell.calls
 
 
@@ -322,6 +329,7 @@ async def test_switch_user_times_out_when_the_user_never_unlocks(fast_switch):
 
     shell = ScriptedShell(
         {
+            "settings --user": [""],
             "am switch-user": [""],
             "am get-current-user": ["10"],
             "am get-started-user-state": ["RUNNING_LOCKED"],
@@ -336,8 +344,31 @@ async def test_switch_user_times_out_when_the_user_never_unlocks(fast_switch):
 async def test_switch_user_reports_a_refused_switch(fast_switch):
     from executor.framework import DeviceUserError, MobilerunFramework
 
-    shell = ScriptedShell({"am switch-user": ["Error: user 99 does not exist"]})
+    shell = ScriptedShell({"settings --user": [""], "am switch-user": ["Error: user 99 does not exist"]})
     framework = MobilerunFramework()
     framework._shell = shell  # type: ignore[method-assign]
     with pytest.raises(DeviceUserError, match="does not exist"):
         await framework.switch_user("emulator-5554", 99)
+
+
+async def test_switch_user_still_switches_when_the_guest_prompt_cannot_be_cleared(fast_switch):
+    from executor.framework import MobilerunFramework
+
+    calls: list[list[str]] = []
+
+    async def fake_shell(serial: str, args: list[str]) -> str:
+        calls.append(args)
+        if args[0] == "settings":
+            raise RuntimeError("settings: permission denied")
+        if args[:2] == ["am", "get-current-user"]:
+            return "10"
+        if args[:2] == ["am", "get-started-user-state"]:
+            return "RUNNING_UNLOCKED"
+        return ""
+
+    framework = MobilerunFramework()
+    framework._shell = fake_shell  # type: ignore[method-assign]
+    await framework.switch_user("emulator-5554", 10)
+    # Gave up on the second namespace after the first refusal, then switched anyway.
+    assert [c[0] for c in calls][:2] == ["settings", "am"]
+    assert ["am", "switch-user", "-w", "10"] in calls
