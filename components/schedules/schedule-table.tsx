@@ -43,6 +43,9 @@ export function ScheduleTable({
   const deviceLabel = Object.fromEntries(
     devices.map((d) => [d.serial, d.label])
   )
+  const taskProfile = Object.fromEntries(
+    tasks.map((t) => [t.id, t.deviceUser ?? null])
+  )
   if (schedules.length === 0)
     return <p className="text-sm text-muted-foreground">No schedules yet.</p>
   return (
@@ -51,6 +54,7 @@ export function ScheduleTable({
         <TableRow>
           {showTask ? <TableHead>Task</TableHead> : null}
           <TableHead>Device</TableHead>
+          <TableHead>Profile</TableHead>
           <TableHead>Trigger</TableHead>
           <TableHead>Runs</TableHead>
           <TableHead>Fails</TableHead>
@@ -79,6 +83,16 @@ export function ScheduleTable({
               >
                 {deviceLabel[s.deviceSerial] ?? s.deviceSerial}
               </Link>
+            </TableCell>
+            <TableCell>
+              {s.deviceUser ??
+                (taskProfile[s.taskId] ? (
+                  <span title="The task's profile">
+                    {taskProfile[s.taskId]}
+                  </span>
+                ) : (
+                  <span className="text-muted-foreground">active</span>
+                ))}
             </TableCell>
             <TableCell>{formatTrigger(s)}</TableCell>
             <TableCell>

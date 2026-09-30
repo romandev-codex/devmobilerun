@@ -17,6 +17,7 @@ import {
 } from "@/lib/models/schedule"
 import { Task } from "@/lib/models/task"
 import { createRun, createSkippedRun } from "@/lib/runs/service"
+import { taskDeviceUserSchema } from "@/lib/tasks"
 
 const asObjectId = (id: string, what = "Schedule") => toObjectId(id, what)
 
@@ -42,6 +43,8 @@ export type ScheduleView = {
   taskId: string
   taskName: string
   deviceSerial: string
+  /** Profile its runs switch the device to; null means the task's own profile. */
+  deviceUser: string | null
   mode: ScheduleMode
   intervalSeconds: number | null
   order: number | null
@@ -101,6 +104,7 @@ export const createScheduleSchema = z
   .object({
     taskId: z.string().min(1),
     deviceSerial: z.string().trim().min(1),
+    deviceUser: taskDeviceUserSchema.default(null),
     mode: z.enum(SCHEDULE_MODES).default("interval"),
     intervalSeconds: intervalSecondsField.nullable().default(null),
     order: orderField.nullable().default(null),
@@ -114,6 +118,7 @@ export const createScheduleSchema = z
 export const updateScheduleSchema = z
   .object({
     deviceSerial: z.string().trim().min(1),
+    deviceUser: taskDeviceUserSchema,
     mode: z.enum(SCHEDULE_MODES),
     intervalSeconds: intervalSecondsField.nullable(),
     order: orderField.nullable(),
@@ -163,6 +168,7 @@ function toView(doc: ScheduleDoc, related: Related): ScheduleView {
     taskId: doc.taskId.toString(),
     taskName: related.taskNames.get(doc.taskId.toString()) ?? "(deleted task)",
     deviceSerial: doc.deviceSerial,
+    deviceUser: doc.deviceUser ?? null,
     mode: doc.mode ?? "interval",
     intervalSeconds: doc.intervalSeconds ?? null,
     order: doc.order ?? null,
@@ -406,6 +412,7 @@ export async function runScheduleNow(id: string): Promise<{ runId: string }> {
   const run = await createRun({
     taskId: doc.taskId.toString(),
     deviceSerial: doc.deviceSerial,
+    deviceUser: doc.deviceUser ?? undefined,
     trigger: "manual",
     scheduleId: doc._id.toString(),
   })
@@ -457,6 +464,7 @@ export async function dispatchDevice(serial: string): Promise<boolean> {
     const run = await createRun({
       taskId: next.taskId.toString(),
       deviceSerial: serial,
+      deviceUser: next.deviceUser ?? undefined,
       trigger: "schedule",
       scheduleId: next._id.toString(),
     })
@@ -596,6 +604,7 @@ export async function executeScheduleTick(scheduleId: string): Promise<void> {
       run = await createRun({
         taskId: schedule.taskId.toString(),
         deviceSerial: schedule.deviceSerial,
+        deviceUser: schedule.deviceUser ?? undefined,
         trigger: "schedule",
         scheduleId,
       })

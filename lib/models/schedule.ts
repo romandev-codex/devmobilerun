@@ -16,6 +16,8 @@ const scheduleSchema = new Schema(
       index: true,
     },
     deviceSerial: { type: String, required: true, index: true },
+    /** Android user (profile) its runs switch the device to; null means the task's profile. */
+    deviceUser: { type: String, default: null },
     mode: {
       type: String,
       enum: SCHEDULE_MODES,

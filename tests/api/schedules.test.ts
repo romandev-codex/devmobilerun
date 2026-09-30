@@ -177,6 +177,45 @@ describe("schedules", () => {
     ).toBe(404)
   })
 
+  it("stores a profile, falls back to the task's, and hands it to every scheduled run", async () => {
+    const { POST } = await import("@/app/api/tasks/route")
+    const res = await POST(
+      new Request(
+        "http://app/x",
+        send("POST", { name: "profiled", goal: "g", deviceUser: "Work" })
+      ),
+      {}
+    )
+    const t = (await res.json()).task.id as string
+    const own = await create({
+      taskId: t,
+      deviceSerial: "A",
+      intervalSeconds: 300,
+      deviceUser: " QA ",
+    })
+    expect(own.status).toBe(201)
+    expect(own.body.schedule.deviceUser).toBe("QA")
+    await tick(own.body.schedule.id)
+    expect((await runsFor(own.body.schedule.id))[0]).toMatchObject({
+      deviceUser: "QA",
+    })
+
+    const cleared = await patch(own.body.schedule.id, { deviceUser: "" })
+    expect(cleared.status).toBe(200)
+    expect(cleared.body.schedule.deviceUser).toBeNull()
+
+    const inherited = await create({
+      taskId: t,
+      deviceSerial: "A",
+      intervalSeconds: 300,
+    })
+    expect(inherited.body.schedule.deviceUser).toBeNull()
+    await tick(inherited.body.schedule.id)
+    expect((await runsFor(inherited.body.schedule.id))[0]).toMatchObject({
+      deviceUser: "Work",
+    })
+  })
+
   it("a tick runs the task, counts the run and plans the next tick from the end of the run", async () => {
     const t = await task("tick")
     const { body } = await create({

@@ -1,7 +1,7 @@
 "use client"
 
 import { useRouter } from "next/navigation"
-import { useState } from "react"
+import { useEffect, useState } from "react"
 
 import { Button } from "@/components/ui/button"
 import {
@@ -14,11 +14,20 @@ import {
 } from "@/components/ui/dialog"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
-import { apiJson } from "@/lib/client/api"
+import { apiFetch, apiJson } from "@/lib/client/api"
+import type { DeviceUserView } from "@/lib/device-view"
 import type { ScheduleMode } from "@/lib/models/schedule"
 import type { ScheduleView } from "@/lib/schedules"
 
-export type ScheduleOption = { id: string; name: string }
+export type ScheduleOption = {
+  id: string
+  name: string
+  /** The profile the task names, shown as the default choice. */
+  deviceUser?: string | null
+}
+
+/** Profile select value for "the task's own profile". */
+const TASK_PROFILE = ""
 export type DeviceOption = { serial: string; label: string; online: boolean }
 
 const selectClass =
@@ -46,6 +55,14 @@ export function ScheduleDialog({
   const [deviceSerial, setDeviceSerial] = useState(
     schedule?.deviceSerial ?? devices[0]?.serial ?? ""
   )
+  const [profile, setProfile] = useState(schedule?.deviceUser ?? TASK_PROFILE)
+  // The chosen phone's profiles, keyed by serial so a late answer for a
+  // phone that is no longer selected is ignored.
+  const [profiles, setProfiles] = useState<{
+    serial: string
+    users: DeviceUserView[] | null
+    error: string | null
+  } | null>(null)
   const [mode, setMode] = useState<ScheduleMode>(schedule?.mode ?? "interval")
   const [interval, setInterval] = useState(
     String(schedule?.intervalSeconds ?? 300)
@@ -60,6 +77,26 @@ export function ScheduleDialog({
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
 
+  useEffect(() => {
+    if (!open || !deviceSerial) return
+    const serial = deviceSerial
+    void apiFetch<{ users: DeviceUserView[] }>(
+      `/api/devices/${encodeURIComponent(serial)}/users`
+    ).then((res) => {
+      setProfiles(
+        res.ok
+          ? { serial, users: res.body.users, error: null }
+          : { serial, users: null, error: res.message }
+      )
+    })
+  }, [open, deviceSerial])
+
+  const users = profiles?.serial === deviceSerial ? profiles.users : null
+  const usersError = profiles?.serial === deviceSerial ? profiles.error : null
+  const selectedTask = tasks.find((t) => t.id === taskId)
+  const taskProfile = selectedTask?.deviceUser ?? null
+  const selectedDevice = devices.find((d) => d.serial === deviceSerial)
+
   async function submit(e: React.FormEvent) {
     e.preventDefault()
     setBusy(true)
@@ -67,6 +104,7 @@ export function ScheduleDialog({
     const payload = {
       ...(schedule ? {} : { taskId }),
       deviceSerial,
+      deviceUser: profile === TASK_PROFILE ? null : profile,
       mode,
       ...(mode === "interval"
         ? { intervalSeconds: Number(interval), order: null }
@@ -134,6 +172,43 @@ export function ScheduleDialog({
                 </option>
               ))}
             </select>
+          </div>
+          <div className="grid gap-1.5">
+            <Label htmlFor="profile">Profile</Label>
+            <select
+              id="profile"
+              value={profile}
+              onChange={(e) => setProfile(e.target.value)}
+              className={selectClass}
+            >
+              <option value={TASK_PROFILE}>
+                {taskProfile
+                  ? `Task's profile (${taskProfile})`
+                  : "Task's profile (none: keep the active one)"}
+              </option>
+              {profile !== TASK_PROFILE &&
+              !users?.some((u) => u.name === profile) ? (
+                <option value={profile}>
+                  {profile}
+                  {users ? " (not on this phone, will be created)" : ""}
+                </option>
+              ) : null}
+              {users?.map((u) => (
+                <option key={u.id} value={u.name}>
+                  {u.name}
+                  {u.current ? " (active)" : ""}
+                </option>
+              ))}
+            </select>
+            <p className="text-xs text-muted-foreground">
+              {usersError
+                ? `Profiles could not be read: ${usersError}`
+                : selectedDevice && !selectedDevice.online
+                  ? "The phone is offline, so its profiles cannot be read."
+                  : users === null
+                    ? "Reading the phone's profiles…"
+                    : "Each run switches the phone to this profile first."}
+            </p>
           </div>
           <div className="grid gap-1.5">
             <Label htmlFor="mode">Trigger</Label>

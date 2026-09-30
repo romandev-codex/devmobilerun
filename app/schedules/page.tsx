@@ -13,7 +13,11 @@ export default async function SchedulesPage() {
     listTasks(),
     listDevices(),
   ])
-  const taskOptions = tasks.map((t) => ({ id: t.id, name: t.name }))
+  const taskOptions = tasks.map((t) => ({
+    id: t.id,
+    name: t.name,
+    deviceUser: t.deviceUser,
+  }))
   const deviceOptions = devices.map((d) => ({
     serial: d.serial,
     label: deviceLabel(d),

@@ -48,6 +48,7 @@ The user opens the app, sees every connected phone with a live-ish screenshot, c
 ### Running tasks
 22. As an operator, I want to press "Run now" on a task and choose a device, so that I can execute it immediately.
 22a. As an operator, I want the Run now dialog to list the chosen phone's profiles with the task's profile preselected, so that I can run once under another profile or keep the active one without editing the task.
+22b. As an operator, I want a schedule to show the chosen phone's profiles and let me pick one, defaulting to the task's, so that scheduled runs land on the right Android user.
 23. As an operator, I want "Run now" to be refused with a clear message if the device already has an active run, so that two agents never fight over one phone.
 24. As an operator, I want to be taken to the run page as soon as the run is created, so that I can watch it.
 25. As an operator, I want the run page to show a live stream of events (thoughts, actions, tool calls, errors) as they happen, so that I understand what the agent is doing.
@@ -122,7 +123,7 @@ The user opens the app, sees every connected phone with a live-ish screenshot, c
 ### MongoDB schema (Mongoose)
 - `devices`: `{serial (unique), displayName?, model?, state: online|offline, lastSeenAt, activeRunId?, lastTemperatureC?, cooldownUntil?}`. Upserted from the executor's device list on every poll; `activeRunId` is the device lock, set with an atomic find-and-update where it is null.
 - `tasks`: `{name, start?: {type: url|instruction, value}, goal, end?, deviceUser?, options: {vision, reasoning, maxSteps}, variables: [{key, value}], createdAt, updatedAt}`.
-- `schedules`: `{taskId, deviceSerial, intervalSeconds, maxRuns?: number|null, enabled, runCount, lastRunId?, nextRunAt?, agendaJobId?, createdAt, updatedAt}`.
+- `schedules`: `{taskId, deviceSerial, deviceUser?, intervalSeconds, maxRuns?: number|null, enabled, runCount, lastRunId?, nextRunAt?, agendaJobId?, createdAt, updatedAt}`.
 - `runs`: `{taskId, scheduleId?, deviceSerial, deviceUser?, status, trigger: manual|schedule, instruction (composed), startUrl?, options, variables, startedAt?, finishedAt?, result?: {success, reason, steps}, error?, skipReason?, createdAt}`.
 - `runEvents`: `{runId, seq, type, at, payload}` where screenshot payloads hold a GridFS file id instead of bytes.
 - `screenshots.files` / `screenshots.chunks`: GridFS bucket for step images, metadata `{runId, seq}`.
