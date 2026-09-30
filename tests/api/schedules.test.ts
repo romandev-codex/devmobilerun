@@ -274,6 +274,38 @@ describe("schedules", () => {
     await patch(id, { enabled: false })
   })
 
+  it("waits for a busy device even while it reads as offline", async () => {
+    const t = await task("busy-offline")
+    const { body } = await create({
+      taskId: t,
+      deviceSerial: "A",
+      intervalSeconds: 3600,
+    })
+    const id = body.schedule.id as string
+    const { Device } = await import("@/lib/models/device")
+    await Device.updateOne(
+      { serial: "A" },
+      { $set: { activeRunId: new mongoose.Types.ObjectId() } }
+    )
+    // A phone mid-run can vanish from the adb list for a moment (profile
+    // switch, reconnect); that is not an offline device, its run just holds it.
+    devices = []
+    try {
+      await tick(id)
+    } finally {
+      devices = [...ONLINE]
+      await Device.updateOne({ serial: "A" }, { $set: { activeRunId: null } })
+    }
+
+    expect(await runsFor(id)).toHaveLength(0)
+    const s = await get(id)
+    expect(s.runCount).toBe(0)
+    expect(s.enabled).toBe(true)
+    expect(new Date(s.nextRunAt).getTime()).toBeLessThanOrEqual(Date.now())
+    expect(await pendingTicks(id)).toBe(1)
+    await patch(id, { enabled: false })
+  })
+
   it("skips and records the tick when the device is offline, without counting it", async () => {
     const t = await task("offline")
     const { body } = await create({

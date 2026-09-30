@@ -578,17 +578,19 @@ export async function executeScheduleTick(scheduleId: string): Promise<void> {
     const device = await Device.findOne({
       serial: schedule.deviceSerial,
     }).lean()
-    if (!unavailable) {
-      if (!device || !device.online) unavailable = "device offline"
-      else if (device.activeRunId) {
-        // Another run holds the device: take it as soon as that run frees it
-        // rather than losing a whole interval to a skip. Staying due keeps the
-        // queue rotation from claiming the device in between.
-        dueAt = new Date()
-        next = new Date(dueAt.getTime() + INTERVAL_RETRY_MS)
-        return
-      }
+    if (device?.activeRunId) {
+      // Another run holds the device: take it as soon as that run frees it
+      // rather than losing a whole interval to a skip. Staying due keeps the
+      // queue rotation from claiming the device in between. This comes before
+      // the online check on purpose: a busy phone can drop off the adb list
+      // for a moment (profile switch, reconnect) and must not be skipped as
+      // offline while its run is still going.
+      dueAt = new Date()
+      next = new Date(dueAt.getTime() + INTERVAL_RETRY_MS)
+      return
     }
+    if (!unavailable && (!device || !device.online))
+      unavailable = "device offline"
 
     if (unavailable) {
       await createSkippedRun({
